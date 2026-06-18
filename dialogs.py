@@ -374,3 +374,94 @@ def show_desktop_image_analysis(root, role_var, roles_dict, log_cb, update_last_
         
     btn_analiz = tk.Button(prompt_dialog, text="Analiz Et", bg="#112519", fg=GREEN, font=FONT_SMALL, relief="flat", command=analyze)
     btn_analiz.pack(fill="x", padx=20, pady=5)
+
+def show_reminder_popup(root, message):
+    popup = tk.Toplevel(root)
+    popup.title("HATIRLATICI BİLDİRİMİ")
+    popup.geometry("380x200")
+    popup.configure(bg=BG, highlightbackground=RED, highlightthickness=2)
+    popup.resizable(False, False)
+    popup.attributes("-topmost", True)
+
+    # Ortala
+    x = root.winfo_x() + (root.winfo_width() - 380) // 2
+    y = root.winfo_y() + (root.winfo_height() - 200) // 2
+    popup.geometry(f"+{x}+{y}")
+
+    color_state = [True]
+
+    title_label = tk.Label(popup, text="// UYARI: ZAMANLAYICI UYARISI", bg=BG, fg=RED, font=("Consolas", 11, "bold"))
+    title_label.pack(pady=(20, 10))
+
+    msg_label = tk.Label(popup, text=message, bg=BG, fg="#ffffff", font=("Consolas", 12), wrap=340)
+    msg_label.pack(pady=10, padx=20, fill="both", expand=True)
+
+    btn_ok = tk.Button(popup, text="TAMAM", bg="#2c121c", fg=RED, font=FONT_SMALL, relief="flat", activebackground=RED, activeforeground="#ffffff", command=popup.destroy)
+    btn_ok.pack(pady=(10, 20), padx=50, fill="x")
+
+    def blink():
+        if not popup.winfo_exists():
+            return
+        if color_state[0]:
+            popup.configure(highlightbackground=AMBER)
+            title_label.config(fg=AMBER)
+            btn_ok.config(fg=AMBER, bg="#332200")
+        else:
+            popup.configure(highlightbackground=RED)
+            title_label.config(fg=RED)
+            btn_ok.config(fg=RED, bg="#2c121c")
+        color_state[0] = not color_state[0]
+        popup.after(500, blink)
+
+    blink()
+
+def show_create_reminder_dialog(root, add_reminder_cb):
+    dialog = tk.Toplevel(root)
+    dialog.title("Zamanlayıcı Bildirimi")
+    dialog.geometry("380x250")
+    dialog.configure(bg=BG, highlightbackground=CYAN, highlightthickness=2)
+    dialog.resizable(False, False)
+    dialog.transient(root)
+    dialog.grab_set()
+
+    # Ortala
+    x = root.winfo_x() + (root.winfo_width() - 380) // 2
+    y = root.winfo_y() + (root.winfo_height() - 250) // 2
+    dialog.geometry(f"+{x}+{y}")
+
+    tk.Label(dialog, text="// YENİ ZAMANLAYICI BİLDİRİMİ", bg=BG, fg=CYAN, font=("Consolas", 11, "bold")).pack(pady=(15, 10))
+
+    tk.Label(dialog, text="Kaç dakika sonra?", bg=BG, fg=DARK_CYAN, font=FONT_SMALL).pack(anchor="w", padx=30)
+    min_entry = tk.Entry(dialog, bg=SIDEBAR_BG, fg="#ffffff", font=FONT, insertbackground=CYAN, relief="flat", bd=2)
+    min_entry.pack(fill="x", padx=30, pady=(0, 10))
+    min_entry.insert(0, "5")
+    min_entry.focus_set()
+
+    tk.Label(dialog, text="Bildirim mesajı?", bg=BG, fg=DARK_CYAN, font=FONT_SMALL).pack(anchor="w", padx=30)
+    msg_entry = tk.Entry(dialog, bg=SIDEBAR_BG, fg="#ffffff", font=FONT, insertbackground=CYAN, relief="flat", bd=2)
+    msg_entry.pack(fill="x", padx=30, pady=(0, 15))
+    msg_entry.insert(0, "Zaman doldu!")
+
+    def on_save():
+        minutes = min_entry.get().strip()
+        message = msg_entry.get().strip()
+        if not minutes or not message:
+            messagebox.showerror("Hata", "Lütfen tüm alanları doldurun.", parent=dialog)
+            return
+        try:
+            float(minutes)
+        except ValueError:
+            messagebox.showerror("Hata", "Lütfen geçerli bir dakika girin.", parent=dialog)
+            return
+        
+        add_reminder_cb(minutes, message)
+        dialog.destroy()
+
+    btn_frame = tk.Frame(dialog, bg=BG)
+    btn_frame.pack(fill="x", padx=30, pady=5)
+
+    btn_cancel = tk.Button(btn_frame, text="İPTAL", bg="#2c121c", fg=RED, font=FONT_SMALL, relief="flat", command=dialog.destroy)
+    btn_cancel.pack(side="left", fill="x", expand=True, padx=(0, 5))
+
+    btn_save = tk.Button(btn_frame, text="KUR", bg="#112519", fg=GREEN, font=FONT_SMALL, relief="flat", command=on_save)
+    btn_save.pack(side="right", fill="x", expand=True, padx=(5, 0))

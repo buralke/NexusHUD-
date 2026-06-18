@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, simpledialog
 import json
 import subprocess
 import webbrowser
@@ -35,7 +35,7 @@ FONT_SMALL = ("Consolas", 9)
 root = tk.Tk()
 root.title("NexusHUD v0.1")
 root.configure(bg=BG)
-root.geometry("900x550")
+root.geometry("900x570")
 
 sidebar = tk.Frame(root, bg=SIDEBAR_BG, width=180, highlightbackground=BORDER_COLOR, highlightthickness=1)
 sidebar.pack(side="left", fill="y")
@@ -143,6 +143,14 @@ def update_last_response(val):
     global last_response
     last_response = val
 
+def desktop_set_clipboard(text):
+    try:
+        root.clipboard_clear()
+        root.clipboard_append(text)
+        root.update()
+    except Exception as e:
+        log(f"[HATA] Pano yazma hatası: {str(e)}", "error")
+
 def speak_desktop(text):
     if not text:
         return
@@ -176,11 +184,34 @@ app_state = {
     "mode": "normal"
 }
 
+def add_reminder(minutes, message):
+    def trigger():
+        root.after(0, lambda: dialogs.show_reminder_popup(root, message))
+        log(f"[ZAMANLAYICI UYARISI] Zaman doldu: {message}", "warn")
+    try:
+        secs = float(minutes) * 60.0
+        threading.Timer(secs, trigger).start()
+        log(f"[SİSTEM] {minutes} dakikalık zamanlayıcı kuruldu: '{message}'", "system")
+    except Exception as e:
+        log(f"[HATA] Zamanlayıcı kurulamadı: {str(e)}", "error")
+
 def run_cmd(cmd):
     global app_state, last_response
     cmd_clean = cmd.strip()
     cmd_lower = cmd_clean.lower()
     
+    # Check for text reminder command
+    if cmd_lower.startswith("hatirlat ") or cmd_lower.startswith("uyar "):
+        parts = cmd_clean.split(" ", 2)
+        if len(parts) >= 3:
+            try:
+                mins = float(parts[1])
+                msg = parts[2]
+                add_reminder(mins, msg)
+                return
+            except ValueError:
+                pass
+
     if cmd_lower.startswith("spotify:"):
         q = cmd_clean[8:].strip()
         url = f"https://open.spotify.com/search/{quote(q)}"
@@ -323,8 +354,11 @@ def show_delete():
 def show_desktop_image():
     dialogs.show_desktop_image_analysis(root, role_var, roles_dict, log, update_last_response)
 
+def ask_desktop_reminder():
+    dialogs.show_create_reminder_dialog(root, add_reminder)
+
 # System Controls Sidebar Layout
-tk.Label(sidebar, text="// SİSTEM KONTROLÜ", bg=SIDEBAR_BG, fg=DARK_CYAN, font=FONT_SMALL).pack(pady=(15, 5), padx=10, anchor="w")
+tk.Label(sidebar, text="// SİSTEM KONTROLÜ", bg=SIDEBAR_BG, fg=DARK_CYAN, font=FONT_SMALL).pack(pady=(10, 2), padx=10, anchor="w")
 
 control_grid = tk.Frame(sidebar, bg=SIDEBAR_BG)
 control_grid.pack(fill="x", padx=6, pady=2)
@@ -350,12 +384,42 @@ btn_sleep.grid(row=2, column=1, sticky="ew", padx=2, pady=2)
 control_grid.columnconfigure(0, weight=1)
 control_grid.columnconfigure(1, weight=1)
 
+# Screen and Power controls
+tk.Label(sidebar, text="// EKRAN & GÜÇ", bg=SIDEBAR_BG, fg=DARK_CYAN, font=FONT_SMALL).pack(pady=(10, 2), padx=10, anchor="w")
+
+brightness_frame = tk.Frame(sidebar, bg=SIDEBAR_BG)
+brightness_frame.pack(fill="x", padx=6, pady=2)
+tk.Label(brightness_frame, text="Parlaklık:", bg=SIDEBAR_BG, fg=CYAN, font=FONT_SMALL).pack(side="left")
+
+def change_brightness_slider(val):
+    system_utils.set_brightness(val)
+    
+brightness_slider = tk.Scale(brightness_frame, from_=0, to=100, orient="horizontal", bg=SIDEBAR_BG, fg=CYAN, highlightthickness=0, font=FONT_SMALL, command=change_brightness_slider)
+brightness_slider.set(system_utils.get_brightness())
+brightness_slider.pack(side="right", fill="x", expand=True, padx=(5, 0))
+
+power_frame = tk.Frame(sidebar, bg=SIDEBAR_BG)
+power_frame.pack(fill="x", padx=6, pady=2)
+tk.Label(power_frame, text="Güç:", bg=SIDEBAR_BG, fg=CYAN, font=FONT_SMALL).pack(side="left")
+
+power_plan_var = tk.StringVar(root, value="balanced")
+def change_power_plan(val):
+    system_utils.set_power_plan(val)
+    
+power_plan_menu = tk.OptionMenu(power_frame, power_plan_var, "balanced", "high_performance", "saver", command=change_power_plan)
+power_plan_menu.config(bg=SIDEBAR_BG, fg=CYAN, activebackground=SIDEBAR_BG, activeforeground=CYAN, relief="flat", highlightthickness=0, font=FONT_SMALL)
+power_plan_menu["menu"].config(bg=BG, fg=CYAN, activebackground=SIDEBAR_BG, activeforeground=CYAN, font=FONT_SMALL)
+power_plan_menu.pack(side="right", fill="x", expand=True, padx=(5, 0))
+
 btn_img_analiz = tk.Button(sidebar, text="📷 Görsel Analiz Et", bg="#14223d", fg=CYAN, font=FONT_SMALL, relief="flat", command=show_desktop_image)
-btn_img_analiz.pack(fill="x", padx=6, pady=5)
+btn_img_analiz.pack(fill="x", padx=6, pady=2)
+
+btn_reminder = tk.Button(sidebar, text="⏰ Zamanlayıcı Kur", bg="#14223d", fg=CYAN, font=FONT_SMALL, relief="flat", command=ask_desktop_reminder)
+btn_reminder.pack(fill="x", padx=6, pady=2)
 
 # Metrics
 metrics_frame = tk.Frame(sidebar, bg=SIDEBAR_BG)
-metrics_frame.pack(side="bottom", fill="x", pady=(10, 5), padx=6)
+metrics_frame.pack(side="bottom", fill="x", pady=(5, 5), padx=6)
 
 cpu_lbl = tk.Label(metrics_frame, text="CPU YÜKÜ: --%", bg=SIDEBAR_BG, fg=CYAN, font=FONT_SMALL, anchor="w")
 cpu_lbl.pack(fill="x")
@@ -368,7 +432,7 @@ def update_desktop_stats():
     root.after(3000, update_desktop_stats)
 
 edit_frame = tk.Frame(sidebar, bg=SIDEBAR_BG)
-edit_frame.pack(side="bottom", fill="x", pady=10, padx=6)
+edit_frame.pack(side="bottom", fill="x", pady=5, padx=6)
 
 add_btn = tk.Button(edit_frame, text="+ Ekle", bg="#112519", fg=GREEN, font=FONT_SMALL, relief="flat", command=show_add)
 add_btn.pack(side="left", fill="x", expand=True, padx=2)
@@ -389,7 +453,15 @@ def start_server_in_thread():
         get_cpu_cb=system_utils.get_cpu_usage,
         get_ram_cb=system_utils.get_ram_usage,
         exec_sys_cb=system_utils.execute_system_cmd,
-        update_last_response_cb=update_last_response
+        update_last_response_cb=update_last_response,
+        
+        # Premium features callbacks
+        get_clip_cb=system_utils.get_clipboard_text,
+        set_clip_cb=lambda text: root.after(0, lambda: desktop_set_clipboard(text)),
+        get_bright_cb=system_utils.get_brightness,
+        set_bright_cb=system_utils.set_brightness,
+        set_power_cb=system_utils.set_power_plan,
+        add_rem_cb=add_reminder
     )
 
 threading.Thread(target=start_server_in_thread, daemon=True).start()

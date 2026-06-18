@@ -1,8 +1,9 @@
 import json
 import socket
 import base64
+import os
 import threading
-from urllib.parse import quote
+from urllib.parse import quote, unquote, urlparse, parse_qs
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 class JarvisHTTPHandler(BaseHTTPRequestHandler):
@@ -15,11 +16,23 @@ class JarvisHTTPHandler(BaseHTTPRequestHandler):
     execute_system_cmd_cb = None
     update_last_response_cb = None
 
+    # New premium callbacks
+    get_clipboard_text_cb = None
+    set_clipboard_text_cb = None
+    get_brightness_cb = None
+    set_brightness_cb = None
+    set_power_plan_cb = None
+    add_reminder_cb = None
+
     def log_message(self, format, *args):
         return
 
     def do_GET(self):
-        if self.path == "/":
+        parsed_url = urlparse(self.path)
+        query_params = parse_qs(parsed_url.query)
+        path = parsed_url.path
+
+        if path == "/":
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
             self.end_headers()
@@ -27,7 +40,7 @@ class JarvisHTTPHandler(BaseHTTPRequestHandler):
 <html>
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Jarvis Kontrol Merkezi</title>
+    <title>NexusHUD Kontrol Merkezi</title>
     <style>
         body {
             background-color: #060913;
@@ -119,7 +132,7 @@ class JarvisHTTPHandler(BaseHTTPRequestHandler):
             color: #ffffff;
         }
         /* Controls */
-        input[type="text"], select {
+        input[type="text"], select, input[type="number"] {
             background-color: #080c16;
             color: #ffffff;
             border: 1px solid #1a2538;
@@ -131,7 +144,7 @@ class JarvisHTTPHandler(BaseHTTPRequestHandler):
             outline: none;
             margin-bottom: 10px;
         }
-        input[type="text"]:focus, select:focus {
+        input[type="text"]:focus, select:focus, input[type="number"]:focus {
             border-color: #00f3ff;
         }
         .flex-row {
@@ -199,16 +212,60 @@ class JarvisHTTPHandler(BaseHTTPRequestHandler):
             border-radius: 4px;
             border: 1px solid #1a2538;
         }
+        /* File Explorer */
+        .file-list {
+            max-height: 200px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            margin-bottom: 10px;
+        }
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px;
+            background-color: #080c16;
+            border: 1px solid #1a2538;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .file-item:hover {
+            border-color: #00f3ff;
+        }
+        .file-name {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .file-meta {
+            color: #005f73;
+            flex-shrink: 0;
+            margin-left: 10px;
+        }
+        /* Slider */
+        .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .slider-container input[type="range"] {
+            flex: 1;
+            accent-color: #00f3ff;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>JARVIS H.U.D.</h1>
+        <h1>NEXUSHUD H.U.D.</h1>
         
-        <!-- PC Durumu -->
+        <!-- PC Durumu & Hızlı Sistem Denetimi -->
         <div class="card">
-            <div class="card-title">// Sistem Metrikleri</div>
-            <div class="stats-grid">
+            <div class="card-title">// Sistem Durumu & Ekran</div>
+            <div class="stats-grid" style="margin-bottom: 15px;">
                 <div class="stat-box">
                     <div>CPU YÜKÜ</div>
                     <div id="cpu-val" class="stat-val">--%</div>
@@ -217,6 +274,21 @@ class JarvisHTTPHandler(BaseHTTPRequestHandler):
                     <div>RAM KULLANIMI</div>
                     <div id="ram-val" class="stat-val">--%</div>
                 </div>
+            </div>
+            
+            <div class="slider-container">
+                <span style="font-size: 12px; color: #005f73;">PARLAKLIK:</span>
+                <input type="range" id="brightness" min="0" max="100" value="70" onchange="setBrightness(this.value)">
+                <span id="brightness-val" style="font-size: 12px; width: 30px; text-align: right;">70%</span>
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 5px;">
+                <span style="font-size: 12px; color: #005f73; margin-bottom: 3px;">GÜÇ PLANI:</span>
+                <select id="power-plan" onchange="setPowerPlan(this.value)" style="margin-bottom: 0;">
+                    <option value="balanced">Dengeli</option>
+                    <option value="high_performance">Yüksek Performans</option>
+                    <option value="saver">Güç Tasarrufu</option>
+                </select>
             </div>
         </div>
 
@@ -253,6 +325,36 @@ class JarvisHTTPHandler(BaseHTTPRequestHandler):
             <div id="img-output" class="output-box" style="display:none;"></div>
         </div>
 
+        <!-- Pano Paylaşımı (Clipboard) -->
+        <div class="card">
+            <div class="card-title">// Pano Paylaşımı (PC Clipboard)</div>
+            <input type="text" id="clipboard-box" placeholder="Pano içeriği...">
+            <div class="btn-grid">
+                <button class="btn-system" onclick="getClipboard()">Panoyu Oku</button>
+                <button class="btn-system" onclick="setClipboard()">Bilgisayara Yaz</button>
+            </div>
+        </div>
+
+        <!-- Hatırlatıcı Zamanlayıcı -->
+        <div class="card">
+            <div class="card-title">// Zamanlayıcı Bildirim Kur</div>
+            <input type="number" id="rem-min" placeholder="Kaç dakika sonra? (Örn: 5)" min="1" value="5">
+            <input type="text" id="rem-msg" placeholder="Hatırlatma notu..." value="Zaman doldu!">
+            <button class="btn-action" onclick="setReminder()" style="width: 100%;">Zamanlayıcıyı Başlat</button>
+        </div>
+
+        <!-- Dosya Gezgini -->
+        <div class="card">
+            <div class="card-title">// Uzaktan Dosya Gezgini</div>
+            <div style="font-size: 11px; margin-bottom: 8px; word-break: break-all; color: #005f73;" id="curr-path">/</div>
+            <button class="btn-system" onclick="goUpDir()" style="width: 100%; margin-bottom: 8px;">⬆ Üst Klasör</button>
+            <div class="file-list" id="file-explorer"></div>
+            <div class="flex-row" style="margin-top: 8px;">
+                <button class="btn-system" onclick="document.getElementById('upload-input').click()" style="flex: 1;">Dosya Yükle</button>
+                <input type="file" id="upload-input" style="display:none;" onchange="uploadFile(this)">
+            </div>
+        </div>
+
         <!-- Uzaktan Kumanda -->
         <div class="card">
             <div class="card-title">// Uzaktan Kumanda</div>
@@ -270,6 +372,7 @@ class JarvisHTTPHandler(BaseHTTPRequestHandler):
     <script>
         let lastResponseText = "";
         let lastImgResponseText = "";
+        let currentPath = "";
 
         // Rolleri Çek
         fetch('/roles')
@@ -297,6 +400,147 @@ class JarvisHTTPHandler(BaseHTTPRequestHandler):
         setInterval(updateStats, 3000);
         updateStats();
 
+        // Parlaklık ve Güç Ayarları
+        function getBrightness() {
+            fetch('/brightness')
+                .then(res => res.json())
+                .then(data => {
+                    document.getElementById("brightness").value = data.brightness;
+                    document.getElementById("brightness-val").innerText = data.brightness + "%";
+                });
+        }
+        getBrightness();
+
+        function setBrightness(val) {
+            document.getElementById("brightness-val").innerText = val + "%";
+            fetch('/brightness', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ brightness: val })
+            });
+        }
+
+        function setPowerPlan(mode) {
+            fetch('/power', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mode: mode })
+            });
+        }
+
+        // Clipboard
+        function getClipboard() {
+            fetch('/clipboard')
+                .then(res => res.json())
+                .then(data => {
+                    document.getElementById("clipboard-box").value = data.text;
+                });
+        }
+
+        function setClipboard() {
+            const val = document.getElementById("clipboard-box").value;
+            fetch('/clipboard', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: val })
+            }).then(() => alert("PC panosu güncellendi!"));
+        }
+
+        // Reminders
+        function setReminder() {
+            const min = document.getElementById("rem-min").value;
+            const msg = document.getElementById("rem-msg").value;
+            fetch('/reminder', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ minutes: min, message: msg })
+            }).then(() => alert(min + " dakika sonra hatırlatılacak."));
+        }
+
+        // File Explorer
+        function loadDirectory(path) {
+            let url = '/files';
+            if (path) {
+                url += '?path=' + encodeURIComponent(path);
+            }
+            fetch(url)
+                .then(res => res.json())
+                .then(data => {
+                    currentPath = data.current_path;
+                    document.getElementById("curr-path").innerText = currentPath;
+                    
+                    const explorer = document.getElementById("file-explorer");
+                    explorer.innerHTML = "";
+                    
+                    data.items.forEach(item => {
+                        const div = document.createElement("div");
+                        div.className = "file-item";
+                        
+                        const nameSpan = document.createElement("span");
+                        nameSpan.className = "file-name";
+                        nameSpan.innerText = (item.is_dir ? "📁 " : "📄 ") + item.name;
+                        
+                        const metaSpan = document.createElement("span");
+                        metaSpan.className = "file-meta";
+                        metaSpan.innerText = item.is_dir ? "Klasör" : formatBytes(item.size);
+                        
+                        div.appendChild(nameSpan);
+                        div.appendChild(metaSpan);
+                        
+                        div.onclick = () => {
+                            if (item.is_dir) {
+                                loadDirectory(currentPath + "/" + item.name);
+                            } else {
+                                window.open('/download?file=' + encodeURIComponent(currentPath + "/" + item.name));
+                            }
+                        };
+                        explorer.appendChild(div);
+                    });
+                });
+        }
+
+        function goUpDir() {
+            if (currentPath) {
+                let parts = currentPath.split(/[\\/]/);
+                parts.pop();
+                let parent = parts.join("/");
+                if (parent.trim() === "") parent = "/";
+                loadDirectory(parent);
+            }
+        }
+
+        function uploadFile(input) {
+            const file = input.files[0];
+            if (!file) return;
+            
+            const btn = event.target;
+            
+            fetch('/upload?filename=' + encodeURIComponent(file.name) + '&dest=' + encodeURIComponent(currentPath), {
+                method: 'POST',
+                body: file
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === "success") {
+                    alert("Dosya başarıyla yüklendi!");
+                    loadDirectory(currentPath);
+                } else {
+                    alert("Dosya yüklenemedi: " + data.message);
+                }
+            })
+            .catch(() => alert("Dosya yükleme hatası."));
+        }
+
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+
+        loadDirectory("");
+
         // Sesli Yanıt (TTS) fonksiyonu
         function speak(text) {
             const synth = window.speechSynthesis;
@@ -309,14 +553,6 @@ class JarvisHTTPHandler(BaseHTTPRequestHandler):
         function speakLastResponse() {
             if (lastResponseText) {
                 speak(lastResponseText);
-            } else {
-                alert("Henüz okunacak bir yanıt yok.");
-            }
-        }
-
-        function speakLastImgResponse() {
-            if (lastImgResponseText) {
-                speak(lastImgResponseText);
             } else {
                 alert("Henüz okunacak bir yanıt yok.");
             }
@@ -452,7 +688,7 @@ class JarvisHTTPHandler(BaseHTTPRequestHandler):
 </html>"""
             self.wfile.write(html.encode('utf-8'))
             return
-        elif self.path == "/stats":
+        elif path == "/stats":
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
@@ -462,18 +698,83 @@ class JarvisHTTPHandler(BaseHTTPRequestHandler):
             }
             self.wfile.write(json.dumps(stats).encode('utf-8'))
             return
-        elif self.path == "/roles":
+        elif path == "/roles":
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
             self.wfile.write(json.dumps(list(JarvisHTTPHandler.roles_dict.keys())).encode('utf-8'))
+            return
+        elif path == "/brightness":
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            brightness = JarvisHTTPHandler.get_brightness_cb() if JarvisHTTPHandler.get_brightness_cb else 70
+            self.wfile.write(json.dumps({"brightness": brightness}).encode('utf-8'))
+            return
+        elif path == "/clipboard":
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            text = JarvisHTTPHandler.get_clipboard_text_cb() if JarvisHTTPHandler.get_clipboard_text_cb else ""
+            self.wfile.write(json.dumps({"text": text}).encode('utf-8'))
+            return
+        elif path == "/files":
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            
+            target_dir = query_params.get('path', [None])[0]
+            if target_dir:
+                target_dir = unquote(target_dir)
+            else:
+                target_dir = os.path.expanduser("~/Desktop")
+                if not os.path.exists(target_dir):
+                    target_dir = os.getcwd()
+            
+            items = []
+            try:
+                if os.path.exists(target_dir) and os.path.isdir(target_dir):
+                    for name in os.listdir(target_dir):
+                        full_p = os.path.join(target_dir, name)
+                        is_dir = os.path.isdir(full_p)
+                        size = os.path.getsize(full_p) if not is_dir else 0
+                        items.append({"name": name, "is_dir": is_dir, "size": size})
+            except Exception:
+                pass
+            
+            # Sort directories first, then files
+            items.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
+            
+            self.wfile.write(json.dumps({
+                "current_path": os.path.abspath(target_dir).replace("\\", "/"),
+                "items": items
+            }).encode('utf-8'))
+            return
+        elif path == "/download":
+            file_path = query_params.get('file', [None])[0]
+            if file_path:
+                file_path = unquote(file_path)
+                if os.path.exists(file_path) and os.path.isfile(file_path):
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/octet-stream')
+                    self.send_header('Content-Disposition', f'attachment; filename="{os.path.basename(file_path)}"')
+                    self.end_headers()
+                    with open(file_path, 'rb') as f:
+                        self.wfile.write(f.read())
+                    return
+            self.send_response(404)
+            self.end_headers()
             return
             
         self.send_response(404)
         self.end_headers()
 
     def do_POST(self):
-        if self.path == "/command":
+        parsed_url = urlparse(self.path)
+        query_params = parse_qs(parsed_url.query)
+        path = parsed_url.path
+
+        if path == "/command":
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
             try:
@@ -524,7 +825,7 @@ class JarvisHTTPHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
                 return
-        elif self.path == "/system":
+        elif path == "/system":
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
             try:
@@ -543,7 +844,7 @@ class JarvisHTTPHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
                 return
-        elif self.path == "/image":
+        elif path == "/image":
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
             try:
@@ -580,11 +881,111 @@ class JarvisHTTPHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
                 return
+        elif path == "/brightness":
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            try:
+                data = json.loads(post_data.decode('utf-8'))
+                val = data.get("brightness", 70)
+                if JarvisHTTPHandler.set_brightness_cb:
+                    JarvisHTTPHandler.set_brightness_cb(val)
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
+                return
+            except Exception as e:
+                self.send_response(400)
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
+                return
+        elif path == "/power":
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            try:
+                data = json.loads(post_data.decode('utf-8'))
+                mode = data.get("mode", "balanced")
+                if JarvisHTTPHandler.set_power_plan_cb:
+                    JarvisHTTPHandler.set_power_plan_cb(mode)
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
+                return
+            except Exception as e:
+                self.send_response(400)
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
+                return
+        elif path == "/clipboard":
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            try:
+                data = json.loads(post_data.decode('utf-8'))
+                text = data.get("text", "")
+                if JarvisHTTPHandler.set_clipboard_text_cb:
+                    JarvisHTTPHandler.set_clipboard_text_cb(text)
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
+                return
+            except Exception as e:
+                self.send_response(400)
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
+                return
+        elif path == "/reminder":
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            try:
+                data = json.loads(post_data.decode('utf-8'))
+                minutes = float(data.get("minutes", 5))
+                message = data.get("message", "Zaman doldu!")
+                if JarvisHTTPHandler.add_reminder_cb:
+                    JarvisHTTPHandler.add_reminder_cb(minutes, message)
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
+                return
+            except Exception as e:
+                self.send_response(400)
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
+                return
+        elif path == "/upload":
+            filename = query_params.get('filename', [None])[0]
+            dest_dir = query_params.get('dest', [None])[0]
+            if filename and dest_dir:
+                filename = unquote(filename)
+                dest_dir = unquote(dest_dir)
+                content_length = int(self.headers['Content-Length'])
+                post_data = self.rfile.read(content_length)
+                
+                try:
+                    os.makedirs(dest_dir, exist_ok=True)
+                    out_path = os.path.join(dest_dir, filename)
+                    with open(out_path, 'wb') as f:
+                        f.write(post_data)
+                        
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
+                    return
+                except Exception as e:
+                    self.send_response(500)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+                    return
 
         self.send_response(404)
         self.end_headers()
 
-def start_http_server(run_cmd_cb, log_cb, roles_dict, get_cpu_cb, get_ram_cb, exec_sys_cb, update_last_response_cb):
+def start_http_server(run_cmd_cb, log_cb, roles_dict, get_cpu_cb, get_ram_cb, exec_sys_cb, update_last_response_cb,
+                      get_clip_cb, set_clip_cb, get_bright_cb, set_bright_cb, set_power_cb, add_rem_cb):
     # Bind callbacks to handler class
     JarvisHTTPHandler.run_cmd_cb = run_cmd_cb
     JarvisHTTPHandler.log_cb = log_cb
@@ -593,6 +994,14 @@ def start_http_server(run_cmd_cb, log_cb, roles_dict, get_cpu_cb, get_ram_cb, ex
     JarvisHTTPHandler.get_ram_usage_cb = get_ram_cb
     JarvisHTTPHandler.execute_system_cmd_cb = exec_sys_cb
     JarvisHTTPHandler.update_last_response_cb = update_last_response_cb
+    
+    # Premium features callbacks
+    JarvisHTTPHandler.get_clipboard_text_cb = get_clip_cb
+    JarvisHTTPHandler.set_clipboard_text_cb = set_clip_cb
+    JarvisHTTPHandler.get_brightness_cb = get_bright_cb
+    JarvisHTTPHandler.set_brightness_cb = set_bright_cb
+    JarvisHTTPHandler.set_power_plan_cb = set_power_cb
+    JarvisHTTPHandler.add_reminder_cb = add_rem_cb
 
     server_address = ('0.0.0.0', 5050)
     try:
@@ -609,7 +1018,6 @@ def start_http_server(run_cmd_cb, log_cb, roles_dict, get_cpu_cb, get_ram_cb, ex
         def log_startup():
             log_cb(f"[SİSTEM] Mobil arayüz aktif: http://{local_ip}:5050", "system")
         
-        # We assume the caller starts this inside a thread, so we run log_startup directly via a timer or after root is ready
         threading.Timer(1.5, log_startup).start()
         httpd.serve_forever()
     except Exception as e:
