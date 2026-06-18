@@ -1,0 +1,7 @@
+{
+  "youtube": "start https://www.youtube.com",
+  "instagram": "start https://www.instagram.com",
+  "whatsapp": "start whatsapp:",
+  "gemini": "start https://gemini.google.com",
+  "claude": "start https://claude.ai"
+}
