@@ -1,17 +1,136 @@
-import tkinter as tk
-from tkinter import messagebox, simpledialog
+import sys
+import os
 import json
 import subprocess
 import webbrowser
-from datetime import datetime
-import os
 import threading
+from datetime import datetime
 from urllib.parse import quote
 
-# Import our custom modular files
+from PySide6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
+    QLabel, QPushButton, QTextEdit, QLineEdit, QFrame, QComboBox,
+    QSlider, QGridLayout, QScrollArea
+)
+from PySide6.QtCore import Qt, QTimer, QObject, Signal
+
+# Import custom modular files
 import system_utils
 import dialogs
 import web_server
+import telegram_bot
+
+# Colors & Style Constants
+CYAN = "#00f3ff"
+DARK_CYAN = "#005f73"
+BG = "#060913"
+SIDEBAR_BG = "#0d111f"
+BORDER_COLOR = "#1a2538"
+GREEN = "#00ff66"
+RED = "#ff0055"
+AMBER = "#ffaa00"
+
+STYLE_SHEET = f"""
+QMainWindow {{
+    background-color: {BG};
+}}
+QWidget {{
+    background-color: {BG};
+    color: #ffffff;
+    font-family: 'Consolas', monospace;
+    font-size: 12px;
+}}
+QFrame#sidebar {{
+    background-color: {SIDEBAR_BG};
+    border-right: 1px solid {BORDER_COLOR};
+}}
+QFrame#input_frame {{
+    background-color: {SIDEBAR_BG};
+    border: 1px solid {BORDER_COLOR};
+    border-radius: 4px;
+}}
+QFrame#status_bar {{
+    background-color: {SIDEBAR_BG};
+    border-top: 1px solid {BORDER_COLOR};
+}}
+QTextEdit#terminal {{
+    background-color: {BG};
+    border: none;
+    color: {CYAN};
+}}
+QLineEdit {{
+    background-color: {SIDEBAR_BG};
+    border: none;
+    color: #ffffff;
+}}
+QPushButton {{
+    background-color: #14223d;
+    border: 1px solid {CYAN};
+    border-radius: 4px;
+    padding: 6px 12px;
+    color: {CYAN};
+    font-weight: bold;
+}}
+QPushButton:hover {{
+    background-color: {CYAN};
+    color: {BG};
+}}
+QPushButton#sidebar_btn {{
+    background-color: {SIDEBAR_BG};
+    border: none;
+    text-align: left;
+    color: {CYAN};
+    padding: 4px 8px;
+}}
+QPushButton#sidebar_btn:hover {{
+    background-color: #14223d;
+}}
+QPushButton#success {{
+    background-color: #112519;
+    border: 1px solid {GREEN};
+    color: {GREEN};
+}}
+QPushButton#success:hover {{
+    background-color: {GREEN};
+    color: {BG};
+}}
+QPushButton#danger {{
+    background-color: #2c121c;
+    border: 1px solid {RED};
+    color: {RED};
+}}
+QPushButton#danger:hover {{
+    background-color: {RED};
+    color: {BG};
+}}
+QComboBox {{
+    background-color: {SIDEBAR_BG};
+    border: 1px solid {BORDER_COLOR};
+    border-radius: 4px;
+    padding: 4px;
+    color: {CYAN};
+}}
+QComboBox QAbstractItemView {{
+    background-color: {SIDEBAR_BG};
+    selection-background-color: #14223d;
+    selection-color: {CYAN};
+    border: 1px solid {BORDER_COLOR};
+}}
+QSlider::groove:horizontal {{
+    border: 1px solid {BORDER_COLOR};
+    height: 6px;
+    background: {SIDEBAR_BG};
+    border-radius: 3px;
+}}
+QSlider::handle:horizontal {{
+    background: {CYAN};
+    border: 1px solid {CYAN};
+    width: 14px;
+    margin-top: -4px;
+    margin-bottom: -4px;
+    border-radius: 7px;
+}}
+"""
 
 # Load command.json
 try:
@@ -20,44 +139,19 @@ try:
 except Exception:
     cmds = {}
 
-CYAN = "#00f3ff"
-DARK_CYAN = "#005f73"
-BG = "#060913"
-SIDEBAR_BG = "#0d111f"
-BORDER_COLOR = "#1a2538"
-GREEN = "#00ff66"
-DARK_GREEN = "#006622"
-RED = "#ff0055"
-AMBER = "#ffaa00"
-FONT = ("Consolas", 11)
-FONT_SMALL = ("Consolas", 9)
+# Thread-safe Qt Signal Emitter
+class BotSignals(QObject):
+    log_signal = Signal(str, str)
+    cmd_signal = Signal(str)
+    role_signal = Signal(str)
+    response_signal = Signal(str)
+    reminder_signal = Signal(str, str, str)
 
-root = tk.Tk()
-root.title("NexusHUD v0.1")
-root.configure(bg=BG)
-root.geometry("900x570")
+signals = BotSignals()
 
-sidebar = tk.Frame(root, bg=SIDEBAR_BG, width=180, highlightbackground=BORDER_COLOR, highlightthickness=1)
-sidebar.pack(side="left", fill="y")
-sidebar.pack_propagate(False)
-
-tk.Label(sidebar, text="// KISAYOLLAR", bg=SIDEBAR_BG, fg=DARK_CYAN, font=FONT_SMALL).pack(pady=(10, 5), padx=10, anchor="w")
-
-main = tk.Frame(root, bg=BG)
-main.pack(side="left", fill="both", expand=True)
-
-# Top Bar
-top_bar = tk.Frame(main, bg=BG)
-top_bar.pack(side="top", fill="x", padx=10, pady=(10, 0))
-
-tk.Label(top_bar, text="// TERMİNAL", bg=BG, fg=DARK_CYAN, font=FONT_SMALL).pack(side="left")
-
-status_btn = tk.Button(top_bar, text="● WIKIPEDIA SEARCH", bg=BG, fg=AMBER, font=FONT_SMALL, relief="flat", activebackground=BG, cursor="hand2")
-status_btn.pack(side="right")
-
-# Role management definitions
+# Global State
 roles_dict = {}
-role_var = tk.StringVar(root)
+last_response = ""
 
 def load_roles():
     global roles_dict
@@ -75,407 +169,575 @@ def load_roles():
         })
 
 load_roles()
-initial_roles = list(roles_dict.keys()) if roles_dict else ["Jarvis"]
-role_var.set(initial_roles[0])
 
-role_label = tk.Label(top_bar, text="ROL:", bg=BG, fg=DARK_CYAN, font=FONT_SMALL)
-role_menu = tk.OptionMenu(top_bar, role_var, *initial_roles)
-role_menu.config(bg=BG, fg=CYAN, activebackground=SIDEBAR_BG, activeforeground=CYAN, relief="flat", highlightthickness=0, font=FONT_SMALL)
-role_menu["menu"].config(bg=BG, fg=CYAN, activebackground=SIDEBAR_BG, activeforeground=CYAN, font=FONT_SMALL)
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("NexusHUD v0.2")
+        self.resize(920, 600)
+        self.setStyleSheet(STYLE_SHEET)
+        
+        # Central widget
+        central = QWidget()
+        self.setCentralWidget(central)
+        main_layout = QHBoxLayout(central)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # 1. Sidebar Frame
+        self.sidebar = QFrame()
+        self.sidebar.setObjectName("sidebar")
+        self.sidebar.setFixedWidth(200)
+        sidebar_layout = QVBoxLayout(self.sidebar)
+        sidebar_layout.setContentsMargins(10, 10, 10, 10)
+        sidebar_layout.setSpacing(8)
+        
+        lbl_shortcuts = QLabel("// KISAYOLLAR")
+        lbl_shortcuts.setStyleSheet(f"color: {DARK_CYAN}; font-weight: bold;")
+        sidebar_layout.addWidget(lbl_shortcuts)
+        
+        # bul command btn
+        btn_bul = QPushButton("> bul")
+        btn_bul.setObjectName("sidebar_btn")
+        btn_bul.clicked.connect(lambda: self.run_cmd("bul"))
+        sidebar_layout.addWidget(btn_bul)
+        
+        # Custom commands scroll area
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        self.scroll_widget = QWidget()
+        self.scroll_widget.setStyleSheet("background: transparent;")
+        self.scroll_layout = QVBoxLayout(self.scroll_widget)
+        self.scroll_layout.setContentsMargins(0, 0, 0, 0)
+        self.scroll_layout.setSpacing(4)
+        self.scroll_area.setWidget(self.scroll_widget)
+        sidebar_layout.addWidget(self.scroll_area)
+        
+        # Sidebar shortcut editor buttons
+        edit_layout = QHBoxLayout()
+        self.btn_add_cmd = QPushButton("+ Ekle")
+        self.btn_add_cmd.setObjectName("success")
+        self.btn_add_cmd.clicked.connect(self.show_add)
+        self.btn_del_cmd = QPushButton("- Sil")
+        self.btn_del_cmd.setObjectName("danger")
+        self.btn_del_cmd.clicked.connect(self.show_delete)
+        edit_layout.addWidget(self.btn_add_cmd)
+        edit_layout.addWidget(self.btn_del_cmd)
+        sidebar_layout.addLayout(edit_layout)
+        
+        # System control section
+        lbl_sys = QLabel("// SİSTEM KONTROLÜ")
+        lbl_sys.setStyleSheet(f"color: {DARK_CYAN}; font-weight: bold;")
+        sidebar_layout.addWidget(lbl_sys)
+        
+        grid = QGridLayout()
+        grid.setSpacing(4)
+        btn_mute = QPushButton("🔇 Sessiz")
+        btn_mute.clicked.connect(lambda: system_utils.execute_system_cmd("volume_mute"))
+        btn_play = QPushButton("⏯ Oynat")
+        btn_play.clicked.connect(lambda: system_utils.execute_system_cmd("media_play_pause"))
+        btn_vdown = QPushButton("🔉 Ses -")
+        btn_vdown.clicked.connect(lambda: system_utils.execute_system_cmd("volume_down"))
+        btn_vup = QPushButton("🔊 Ses +")
+        btn_vup.clicked.connect(lambda: system_utils.execute_system_cmd("volume_up"))
+        btn_lock = QPushButton("🔒 Kilitle")
+        btn_lock.setObjectName("danger")
+        btn_lock.clicked.connect(lambda: system_utils.execute_system_cmd("lock"))
+        btn_sleep = QPushButton("💤 Uyku")
+        btn_sleep.setObjectName("danger")
+        btn_sleep.clicked.connect(lambda: system_utils.execute_system_cmd("sleep"))
+        
+        grid.addWidget(btn_mute, 0, 0)
+        grid.addWidget(btn_play, 0, 1)
+        grid.addWidget(btn_vdown, 1, 0)
+        grid.addWidget(btn_vup, 1, 1)
+        grid.addWidget(btn_lock, 2, 0)
+        grid.addWidget(btn_sleep, 2, 1)
+        sidebar_layout.addLayout(grid)
+        
+        # Screen and Power
+        lbl_screen = QLabel("// EKRAN & GÜÇ")
+        lbl_screen.setStyleSheet(f"color: {DARK_CYAN}; font-weight: bold;")
+        sidebar_layout.addWidget(lbl_screen)
+        
+        bright_layout = QHBoxLayout()
+        bright_layout.addWidget(QLabel("Parlaklık:"))
+        self.slider = QSlider(Qt.Horizontal)
+        self.slider.setRange(0, 100)
+        self.slider.setValue(system_utils.get_brightness())
+        self.slider.valueChanged.connect(system_utils.set_brightness)
+        bright_layout.addWidget(self.slider)
+        sidebar_layout.addLayout(bright_layout)
+        
+        power_layout = QHBoxLayout()
+        power_layout.addWidget(QLabel("Güç:"))
+        self.power_combo = QComboBox()
+        self.power_combo.addItems(["balanced", "high_performance", "saver"])
+        self.power_combo.currentTextChanged.connect(system_utils.set_power_plan)
+        power_layout.addWidget(self.power_combo)
+        sidebar_layout.addLayout(power_layout)
+        
+        # Extra utils
+        btn_analysis = QPushButton("📷 Görsel Analiz Et")
+        btn_analysis.clicked.connect(self.show_desktop_image)
+        sidebar_layout.addWidget(btn_analysis)
+        
+        btn_reminders = QPushButton("⏰ Hatırlatıcı Yönetimi")
+        btn_reminders.clicked.connect(lambda: dialogs.show_reminder_manager_dialog(self, self.log))
+        sidebar_layout.addWidget(btn_reminders)
+        
+        # System metrics bottom sidebar
+        self.lbl_cpu = QLabel("CPU YÜKÜ: --%")
+        self.lbl_cpu.setStyleSheet(f"color: {CYAN};")
+        self.lbl_ram = QLabel("RAM KULLAN: --%")
+        self.lbl_ram.setStyleSheet(f"color: {CYAN};")
+        sidebar_layout.addWidget(self.lbl_cpu)
+        sidebar_layout.addWidget(self.lbl_ram)
+        
+        main_layout.addWidget(self.sidebar)
+        
+        # 2. Main Terminal Panel
+        main_panel = QWidget()
+        panel_layout = QVBoxLayout(main_panel)
+        panel_layout.setContentsMargins(10, 10, 10, 10)
+        panel_layout.setSpacing(6)
+        
+        # Top bar in Main Panel
+        top_bar_layout = QHBoxLayout()
+        top_bar_layout.addWidget(QLabel("// TERMİNAL"))
+        
+        self.btn_api_status = QPushButton("● WIKIPEDIA SEARCH")
+        self.btn_api_status.setStyleSheet(f"color: {AMBER}; border: 1px solid {AMBER};")
+        self.btn_api_status.clicked.connect(self.show_api_settings)
+        top_bar_layout.addWidget(self.btn_api_status)
+        
+        self.btn_tg_settings = QPushButton("[Telegram Ayarları]")
+        self.btn_tg_settings.clicked.connect(lambda: dialogs.show_telegram_settings_dialog(self, self.log))
+        top_bar_layout.addWidget(self.btn_tg_settings)
+        
+        self.lbl_role = QLabel("ROL:")
+        self.lbl_role.setStyleSheet(f"color: {DARK_CYAN};")
+        self.role_combo = QComboBox()
+        self.role_combo.currentTextChanged.connect(self.on_role_changed)
+        
+        self.btn_roles = QPushButton("[Roller]")
+        self.btn_roles.clicked.connect(self.show_roles)
+        
+        top_bar_layout.addWidget(self.lbl_role)
+        top_bar_layout.addWidget(self.role_combo)
+        top_bar_layout.addWidget(self.btn_roles)
+        
+        panel_layout.addLayout(top_bar_layout)
+        
+        # Terminal Output area
+        self.terminal = QTextEdit()
+        self.terminal.setObjectName("terminal")
+        self.terminal.setReadOnly(True)
+        panel_layout.addWidget(self.terminal)
+        
+        # Terminal command input frame
+        input_frame = QFrame()
+        input_frame.setObjectName("input_frame")
+        input_layout = QHBoxLayout(input_frame)
+        input_layout.setContentsMargins(8, 4, 8, 4)
+        input_layout.addWidget(QLabel("JARVIS >"))
+        
+        self.cmd_input = QLineEdit()
+        self.cmd_input.returnPressed.connect(self.on_enter)
+        input_layout.addWidget(self.cmd_input)
+        
+        btn_read = QPushButton("🔊 Oku")
+        btn_read.clicked.connect(lambda: self.speak_desktop(last_response))
+        input_layout.addWidget(btn_read)
+        panel_layout.addWidget(input_frame)
+        
+        # Status Bar bottom
+        self.status_bar_frame = QFrame()
+        self.status_bar_frame.setObjectName("status_bar")
+        self.status_bar_frame.setFixedHeight(26)
+        sb_layout = QHBoxLayout(self.status_bar_frame)
+        sb_layout.setContentsMargins(10, 0, 10, 0)
+        
+        self.status_lbl = QLabel("SİSTEM: AKTİF")
+        self.status_lbl.setStyleSheet(f"color: {DARK_CYAN};")
+        self.clock_lbl = QLabel("")
+        self.clock_lbl.setStyleSheet(f"color: {DARK_CYAN};")
+        
+        sb_layout.addWidget(self.status_lbl)
+        sb_layout.addStretch()
+        sb_layout.addWidget(self.clock_lbl)
+        panel_layout.addWidget(self.status_bar_frame)
+        
+        main_layout.addWidget(main_panel)
+        
+        # Register Signals
+        signals.log_signal.connect(self.log)
+        signals.cmd_signal.connect(self.run_cmd)
+        signals.role_signal.connect(self.set_active_role)
+        signals.response_signal.connect(self.update_last_response)
+        signals.reminder_signal.connect(self.show_scheduled_reminder)
+        
+        # Timers
+        self.clock_timer = QTimer(self)
+        self.clock_timer.timeout.connect(self.update_clock)
+        self.clock_timer.start(1000)
+        
+        self.metrics_timer = QTimer(self)
+        self.metrics_timer.timeout.connect(self.update_desktop_stats)
+        self.metrics_timer.start(3000)
+        
+        # Init lists
+        self.refresh_sidebar()
+        self.update_api_status()
+        self.update_desktop_stats()
+        
+    def update_clock(self):
+        self.clock_lbl.setText(datetime.now().strftime("%H:%M:%S"))
+        
+    def update_desktop_stats(self):
+        self.lbl_cpu.setText(f"CPU YÜKÜ: {system_utils.get_cpu_usage()}%")
+        self.lbl_ram.setText(f"RAM KULLAN: {system_utils.get_ram_usage()}%")
+        
+    def log(self, text, tag=""):
+        color = CYAN
+        if tag == "system":
+            color = CYAN
+        elif tag == "input":
+            color = "#ffffff"
+        elif tag == "error":
+            color = RED
+        elif tag == "warn":
+            color = AMBER
+            
+        formatted_text = f"<span style='color:{color};'>{text.replace(chr(10), '<br>')}</span>"
+        self.terminal.append(formatted_text)
+        
+    def refresh_sidebar(self):
+        global cmds
+        # Clear old dynamic layout
+        for i in reversed(range(self.scroll_layout.count())): 
+            widget = self.scroll_layout.itemAt(i).widget()
+            if widget is not None:
+                widget.deleteLater()
+                
+        try:
+            with open("command.json", "r", encoding="utf-8") as f:
+                cmds = json.load(f)
+        except Exception as e:
+            self.log(f"[SİSTEM HATA] command.json okunamadı: {str(e)}", "error")
+            return
+            
+        for k in cmds:
+            btn = QPushButton(f"> {k}")
+            btn.setObjectName("sidebar_btn")
+            btn.clicked.connect(lambda checked=False, cmd_key=k: self.run_cmd(cmd_key))
+            self.scroll_layout.addWidget(btn)
+            
+    def update_api_status(self):
+        from dotenv import load_dotenv
+        load_dotenv()
+        key = os.getenv("GEMINI_API_KEY", "")
+        if key and key.strip() and not key.startswith("YOUR_GEMINI_API_KEY"):
+            import search_bot
+            search_bot.configure_api(key)
+            self.btn_api_status.setText("● GEMINI API")
+            self.btn_api_status.setStyleSheet(f"color: {GREEN}; border: 1px solid {GREEN};")
+            
+            # Show role controls
+            self.lbl_role.show()
+            self.role_combo.show()
+            self.btn_roles.show()
+            
+            # Populate role combo
+            self.role_combo.blockSignals(True)
+            self.role_combo.clear()
+            self.role_combo.addItems(list(roles_dict.keys()))
+            self.role_combo.setCurrentText("Jarvis")
+            self.role_combo.blockSignals(False)
+        else:
+            import search_bot
+            search_bot.configure_api(None)
+            self.btn_api_status.setText("● WIKIPEDIA SEARCH")
+            self.btn_api_status.setStyleSheet(f"color: {AMBER}; border: 1px solid {AMBER};")
+            
+            # Hide role controls
+            self.lbl_role.hide()
+            self.role_combo.hide()
+            self.btn_roles.hide()
+            
+    def show_roles(self):
+        dialogs.show_roles_dialog(self, roles_dict, self.refresh_roles, self.log)
+        
+    def refresh_roles(self):
+        load_roles()
+        self.role_combo.blockSignals(True)
+        current = self.role_combo.currentText()
+        self.role_combo.clear()
+        self.role_combo.addItems(list(roles_dict.keys()))
+        if current in roles_dict:
+            self.role_combo.setCurrentText(current)
+        self.role_combo.blockSignals(False)
+        
+    def on_role_changed(self, text):
+        self.log(f"[SİSTEM] Aktif yapay zeka rolü değiştirildi: {text}", "system")
+        
+    def set_active_role(self, role_name):
+        if role_name in roles_dict:
+            self.role_combo.setCurrentText(role_name)
+            
+    def show_telegram_settings(self):
+        dialogs.show_telegram_settings_dialog(self, self.log)
+        
+    def show_api_settings(self):
+        dialogs.show_api_settings_dialog(self, self.update_api_status, self.log)
+        
+    def show_add(self):
+        dialogs.show_add_dialog(self, self.refresh_sidebar, self.log)
+        
+    def show_delete(self):
+        dialogs.show_delete_dialog(self, cmds, self.refresh_sidebar, self.log)
+        
+    def show_desktop_image(self):
+        dialogs.show_desktop_image_analysis(self, self.role_combo.currentText(), roles_dict, self.log, self.update_last_response)
+        
+    def show_scheduled_reminder(self, rem_id, msg, t_type):
+        import scheduler
+        dialogs.show_scheduled_reminder_popup(self, rem_id, msg, t_type, scheduler.delete_reminder)
+        
+    def on_enter(self):
+        text = self.cmd_input.text().strip()
+        if text:
+            self.run_cmd(text)
+            self.cmd_input.clear()
+            
+    def update_last_response(self, val):
+        global last_response
+        last_response = val
+        
+    def speak_desktop(self, text):
+        if not text:
+            return
+        clean_text = text.replace('"', "'").replace("\n", " ")
+        ps_cmd = f'Add-Type -AssemblyName System.Speech; $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer; $synth.Speak("{clean_text}")'
+        subprocess.Popen(["powershell", "-Command", ps_cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+    def desktop_set_clipboard(self, text):
+        try:
+            clipboard = QApplication.clipboard()
+            clipboard.setText(text)
+        except Exception as e:
+            self.log(f"[HATA] Pano yazma hatası: {str(e)}", "error")
+            
+    def run_cmd(self, cmd):
+        global last_response
+        cmd_clean = cmd.strip()
+        cmd_lower = cmd_clean.lower()
+        
+        self.log(f"JARVIS &gt; {cmd_clean}", "input")
+        
+        # Check for text reminder command
+        if cmd_lower.startswith("hatirlat ") or cmd_lower.startswith("uyar "):
+            parts = cmd_clean.split(" ", 2)
+            if len(parts) >= 3:
+                try:
+                    mins = float(parts[1])
+                    msg = parts[2]
+                    import scheduler
+                    scheduler.add_recurrent_reminder(msg, mins)
+                    self.log(f"[SİSTEM] Tekrarlı hatırlatıcı kuruldu (Her {mins} dk): '{msg}'", "system")
+                    return
+                except ValueError:
+                    pass
+                    
+        if cmd_lower.startswith("spotify:"):
+            q = cmd_clean[8:].strip()
+            url = f"https://open.spotify.com/search/{quote(q)}"
+            self.log(f"[JARVIS] Spotify'da aranıyor: {q}", "system")
+            webbrowser.open(url)
+            return
+            
+        if cmd_lower.startswith("bul "):
+            q = cmd_clean[4:].strip()
+            self.log(f"[JARVIS] Google'da aranıyor: {q}", "system")
+            webbrowser.open(f"https://www.google.com/search?q={quote(q)}")
+            return
+            
+        if cmd_lower == "bul":
+            self.log("[SİSTEM] 'bul <arama_terimi>' şeklinde kullanın.", "warn")
+            return
+            
+        # Check in command.json
+        if cmd_lower in cmds:
+            target = cmds[cmd_lower]
+            self.log(f"[SİSTEM] Kısayol çalıştırılıyor: {cmd_lower} -> {target}", "system")
+            if target.startswith("http://") or target.startswith("https://"):
+                webbrowser.open(target)
+            else:
+                try:
+                    subprocess.Popen(target, shell=True)
+                except Exception as e:
+                    self.log(f"[HATA] Kısayol çalıştırılamadı: {str(e)}", "error")
+            return
+            
+        # Ask Gemini / Search Wikipedia
+        from dotenv import load_dotenv
+        load_dotenv()
+        key = os.getenv("GEMINI_API_KEY", "")
+        
+        if key and key.strip() and not key.startswith("YOUR_GEMINI_API_KEY"):
+            # Gemini ask
+            self.log("[JARVIS] Düşünüyor...", "system")
+            
+            def ask_gemini_thread():
+                try:
+                    from search_bot import ask_gemini
+                    active_role = self.role_combo.currentText()
+                    system_instruction = roles_dict.get(active_role, None)
+                    ans = ask_gemini(cmd_clean, system_instruction=system_instruction)
+                    signals.response_signal.emit(ans)
+                    signals.log_signal.emit(f"\n{ans}\n", "")
+                except Exception as e:
+                    signals.log_signal.emit(f"[HATA] Gemini yanıt veremedi: {str(e)}", "error")
+                    
+            threading.Thread(target=ask_gemini_thread, daemon=True).start()
+        else:
+            # Wikipedia Search
+            self.log("[JARVIS] Wikipedia'da aranıyor...", "system")
+            
+            def ask_wiki_thread():
+                try:
+                    from search_bot import search_wikipedia
+                    ans = search_wikipedia(cmd_clean)
+                    signals.response_signal.emit(ans)
+                    signals.log_signal.emit(f"\n{ans}\n", "")
+                except Exception as e:
+                    signals.log_signal.emit(f"[HATA] Wikipedia aranamadı: {str(e)}", "error")
+                    
+            threading.Thread(target=ask_wiki_thread, daemon=True).start()
 
-def refresh_roles_menu():
-    load_roles()
-    menu = role_menu["menu"]
-    menu.delete(0, "end")
-    for r_name in roles_dict.keys():
-        menu.add_command(label=r_name, command=lambda value=r_name: role_var.set(value))
-    if role_var.get() not in roles_dict:
-        role_var.set(next(iter(roles_dict.keys())))
+def add_reminder(minutes, message):
+    import scheduler
+    scheduler.add_recurrent_reminder(message, minutes)
 
-def show_roles():
-    dialogs.show_roles_dialog(root, roles_dict, refresh_roles_menu, log)
+class RoleVarWrapper:
+    def __init__(self, combo):
+        self.combo = combo
+    def get(self):
+        return self.combo.currentText()
 
-roles_btn = tk.Button(top_bar, text="[Roller]", bg=BG, fg=CYAN, font=FONT_SMALL, relief="flat", activebackground=BG, cursor="hand2", command=show_roles)
-
-def show_api_settings():
-    dialogs.show_api_settings_dialog(root, update_api_status, log)
-
-status_btn.config(command=show_api_settings)
-
-def update_api_status():
+def main():
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    
+    # Check if first launch / guide needed
     from dotenv import load_dotenv
     load_dotenv()
     key = os.getenv("GEMINI_API_KEY", "")
-    if key and key.strip() and not key.startswith("YOUR_GEMINI_API_KEY"):
-        import search_bot
-        search_bot.configure_api(key)
-        status_btn.config(text="● GEMINI API", fg=GREEN, activeforeground=GREEN)
-        roles_btn.pack(side="right", padx=(10, 0))
-        role_menu.pack(side="right", padx=(5, 0))
-        role_label.pack(side="right", padx=(5, 0))
-    else:
-        import search_bot
-        search_bot.configure_api(None)
-        status_btn.config(text="● WIKIPEDIA SEARCH", fg=AMBER, activeforeground=AMBER)
-        roles_btn.pack_forget()
-        role_menu.pack_forget()
-        role_label.pack_forget()
-
-terminal = tk.Text(main, bg=BG, fg=CYAN, font=FONT, insertbackground=CYAN, state="disabled", wrap="word", relief="flat", bd=0)
-terminal.pack(fill="both", expand=True, padx=10, pady=(5, 10))
-
-terminal.tag_config("system", foreground=CYAN)
-terminal.tag_config("input", foreground="#ffffff")
-terminal.tag_config("error", foreground=RED)
-terminal.tag_config("warn", foreground=AMBER)
-
-input_frame = tk.Frame(main, bg=SIDEBAR_BG, highlightbackground=BORDER_COLOR, highlightthickness=1)
-input_frame.pack(fill="x", padx=10, pady=(0, 10))
-
-tk.Label(input_frame, text="JARVIS >", bg=SIDEBAR_BG, fg=CYAN, font=FONT).pack(side="left", padx=(5, 5))
-
-cmd_input = tk.Entry(input_frame, bg=SIDEBAR_BG, fg="#ffffff", font=FONT, insertbackground=CYAN, relief="flat", bd=0)
-cmd_input.pack(side="left", fill="x", expand=True, pady=6)
-
-last_response = ""
-
-def update_last_response(val):
-    global last_response
-    last_response = val
-
-def desktop_set_clipboard(text):
-    try:
-        root.clipboard_clear()
-        root.clipboard_append(text)
-        root.update()
-    except Exception as e:
-        log(f"[HATA] Pano yazma hatası: {str(e)}", "error")
-
-def speak_desktop(text):
-    if not text:
-        return
-    clean_text = text.replace('"', "'").replace("\n", " ")
-    ps_cmd = f'Add-Type -AssemblyName System.Speech; $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer; $synth.Speak("{clean_text}")'
-    subprocess.Popen(["powershell", "-Command", ps_cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-btn_read = tk.Button(input_frame, text="🔊 Oku", bg=SIDEBAR_BG, fg=CYAN, font=FONT_SMALL, relief="flat", activebackground="#14223d", activeforeground=CYAN, cursor="hand2", command=lambda: speak_desktop(last_response))
-btn_read.pack(side="right", padx=5)
-
-status_bar = tk.Frame(root, bg=SIDEBAR_BG, height=24, highlightbackground=BORDER_COLOR, highlightthickness=1)
-status_bar.pack(side="bottom", fill="x")
-
-status_label = tk.Label(status_bar, text="SİSTEM: AKTİF", bg=SIDEBAR_BG, fg=DARK_CYAN, font=FONT_SMALL)
-status_label.pack(side="left", padx=10)
-
-clock_label = tk.Label(status_bar, text="", bg=SIDEBAR_BG, fg=DARK_CYAN, font=FONT_SMALL)
-clock_label.pack(side="right", padx=10)
-
-def update_clock():
-    clock_label.config(text=datetime.now().strftime("%H:%M:%S"))
-    root.after(1000, update_clock)
-
-def log(text, tag=""):
-    terminal.config(state="normal")
-    terminal.insert("end", text + "\n", tag)
-    terminal.see("end")
-    terminal.config(state="disabled")
-
-app_state = {
-    "mode": "normal"
-}
-
-def add_reminder(minutes, message):
-    def trigger():
-        root.after(0, lambda: dialogs.show_reminder_popup(root, message))
-        log(f"[ZAMANLAYICI UYARISI] Zaman doldu: {message}", "warn")
-    try:
-        secs = float(minutes) * 60.0
-        threading.Timer(secs, trigger).start()
-        log(f"[SİSTEM] {minutes} dakikalık zamanlayıcı kuruldu: '{message}'", "system")
-    except Exception as e:
-        log(f"[HATA] Zamanlayıcı kurulamadı: {str(e)}", "error")
-
-def run_cmd(cmd):
-    global app_state, last_response
-    cmd_clean = cmd.strip()
-    cmd_lower = cmd_clean.lower()
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    if (not key or key.startswith("YOUR_GEMINI") or not key.strip()) and (not token or token.startswith("YOUR_TELEGRAM") or not token.strip()):
+        QTimer.singleShot(500, lambda: dialogs.show_welcome_guide(window))
     
-    # Check for text reminder command
-    if cmd_lower.startswith("hatirlat ") or cmd_lower.startswith("uyar "):
-        parts = cmd_clean.split(" ", 2)
-        if len(parts) >= 3:
-            try:
-                mins = float(parts[1])
-                msg = parts[2]
-                add_reminder(mins, msg)
-                return
-            except ValueError:
-                pass
-
-    if cmd_lower.startswith("spotify:"):
-        q = cmd_clean[8:].strip()
-        url = f"https://open.spotify.com/search/{quote(q)}"
-        log(f"[JARVIS] Spotify'da aranıyor: {q}", "system")
-        webbrowser.open(url)
-        return
-    
-    if app_state["mode"] == "search":
-        app_state["mode"] = "normal"
-        if not cmd_clean:
-            log("[JARVIS] Arama iptal edildi.", "warn")
-            return
-        log("> " + cmd_clean, "input")
-        log("[SİSTEM] İnternette aranıyor, lütfen bekleyin...", "warn")
-        
-        def do_search():
-            from search_bot import web_search_and_summarize
-            active_role = role_var.get()
-            system_instruction = roles_dict.get(active_role, None)
-            ans, sources = web_search_and_summarize(cmd_clean, system_instruction=system_instruction)
-            
-            update_last_response(ans)
-            
-            def update_ui():
-                log("\n[JARVIS]", "system")
-                log(ans)
-                if sources:
-                    log("\n[KAYNAKLAR]", "system")
-                    for title, uri in sources:
-                        log(f"- {title}: {uri}", "warn")
-                log("")
-            
-            root.after(0, update_ui)
-            
-        threading.Thread(target=do_search, daemon=True).start()
-        return
-
-    log("> " + cmd_lower, "input")
-
-    if cmd_lower in ("ex", "cik"):
-        log("[JARVIS] Oturum sonlandırılıyor...", "warn")
-        root.after(1000, root.destroy)
-        return
-    if cmd_lower in ("yardim", "help"):
-        log("[JARVIS] Komutlar: bul, " + ", ".join(cmds.keys()), "system")
-        return
-    if cmd_lower in ("temizle", "cls"):
-        terminal.config(state="normal")
-        terminal.delete("1.0", "end")
-        terminal.config(state="disabled")
-        return
-    if cmd_lower == "bul":
-        app_state["mode"] = "search"
-        log("[JARVIS] Ne bulmak istiyorsunuz?", "system")
-        return
-
-    if cmd_lower in cmds:
-        val = cmds[cmd_lower]
-        log("[JARVIS] Açılıyor: " + cmd_lower, "system")
-
-        if val.startswith("http"):
-            webbrowser.open(val)
-        else:
-            subprocess.Popen(val, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    else:
-        log("[JARVIS] Düşünüyor...", "system")
-        def ask_gemini_thread():
-            from search_bot import ask_gemini
-            active_role = role_var.get()
-            system_instruction = roles_dict.get(active_role, None)
-            ans = ask_gemini(cmd_clean, system_instruction=system_instruction)
-            
-            update_last_response(ans)
-            
-            def update_ui():
-                log("\n[JARVIS]", "system")
-                log(ans)
-                log("")
-            root.after(0, update_ui)
-            
-        threading.Thread(target=ask_gemini_thread, daemon=True).start()
-
-def on_enter(event=None):
-    text = cmd_input.get().strip()
-    if text:
-        run_cmd(text)
-        cmd_input.delete(0, "end")
-
-cmd_input.bind("<Return>", on_enter)
-
-def create_fixed_btn(label, cmd_to_run):
-    btn = tk.Button(
-        sidebar, text="> " + label,
-        bg=SIDEBAR_BG, fg=CYAN,
-        font=FONT_SMALL, relief="flat",
-        bd=0, anchor="w", padx=8,
-        activebackground="#14223d",
-        activeforeground=CYAN,
-        cursor="hand2",
-        command=lambda: run_cmd(cmd_to_run)
-    )
-    btn.pack(fill="x", pady=2, padx=6)
-
-create_fixed_btn("bul", "bul")
-
-cmd_buttons_frame = tk.Frame(sidebar, bg=SIDEBAR_BG)
-cmd_buttons_frame.pack(fill="both", expand=True)
-
-def refresh_sidebar():
-    global cmds
-    for widget in cmd_buttons_frame.winfo_children():
-        widget.destroy()
-    
-    try:
-        with open("command.json", "r", encoding="utf-8") as f:
-            cmds = json.load(f)
-    except Exception as e:
-        log(f"[SİSTEM HATA] command.json okunamadı: {str(e)}", "error")
-        return
-        
-    for k in cmds:
-        btn = tk.Button(
-            cmd_buttons_frame, text="> " + k,
-            bg=SIDEBAR_BG, fg=CYAN,
-            font=FONT_SMALL, relief="flat",
-            bd=0, anchor="w", padx=8,
-            activebackground="#14223d",
-            activeforeground=CYAN,
-            cursor="hand2",
-            command=lambda l=k: run_cmd(l)
+    # Start the Web HUD server in a daemon thread
+    def start_server_in_thread():
+        web_server.start_http_server(
+            run_cmd_cb=lambda cmd: signals.cmd_signal.emit(cmd),
+            log_cb=lambda text, tag="": signals.log_signal.emit(text, tag),
+            roles_dict=roles_dict,
+            get_cpu_cb=system_utils.get_cpu_usage,
+            get_ram_cb=system_utils.get_ram_usage,
+            exec_sys_cb=system_utils.execute_system_cmd,
+            update_last_response_cb=window.update_last_response,
+            get_clip_cb=system_utils.get_clipboard_text,
+            set_clip_cb=window.desktop_set_clipboard,
+            get_bright_cb=system_utils.get_brightness,
+            set_bright_cb=system_utils.set_brightness,
+            set_power_cb=system_utils.set_power_plan,
+            add_rem_cb=add_reminder
         )
-        btn.pack(fill="x", pady=2, padx=6)
-
-def show_add():
-    dialogs.show_add_dialog(root, refresh_sidebar, log)
-
-def show_delete():
-    dialogs.show_delete_dialog(root, cmds, refresh_sidebar, log)
-
-def show_desktop_image():
-    dialogs.show_desktop_image_analysis(root, role_var, roles_dict, log, update_last_response)
-
-def ask_desktop_reminder():
-    dialogs.show_create_reminder_dialog(root, add_reminder)
-
-# System Controls Sidebar Layout
-tk.Label(sidebar, text="// SİSTEM KONTROLÜ", bg=SIDEBAR_BG, fg=DARK_CYAN, font=FONT_SMALL).pack(pady=(10, 2), padx=10, anchor="w")
-
-control_grid = tk.Frame(sidebar, bg=SIDEBAR_BG)
-control_grid.pack(fill="x", padx=6, pady=2)
-
-btn_mute = tk.Button(control_grid, text="🔇 Sessiz", bg="#14223d", fg=CYAN, font=FONT_SMALL, relief="flat", command=lambda: system_utils.execute_system_cmd("volume_mute"))
-btn_mute.grid(row=0, column=0, sticky="ew", padx=2, pady=2)
-
-btn_play = tk.Button(control_grid, text="⏯ Oynat", bg="#14223d", fg=CYAN, font=FONT_SMALL, relief="flat", command=lambda: system_utils.execute_system_cmd("media_play_pause"))
-btn_play.grid(row=0, column=1, sticky="ew", padx=2, pady=2)
-
-btn_vdown = tk.Button(control_grid, text="🔉 Ses -", bg="#14223d", fg=CYAN, font=FONT_SMALL, relief="flat", command=lambda: system_utils.execute_system_cmd("volume_down"))
-btn_vdown.grid(row=1, column=0, sticky="ew", padx=2, pady=2)
-
-btn_vup = tk.Button(control_grid, text="🔊 Ses +", bg="#14223d", fg=CYAN, font=FONT_SMALL, relief="flat", command=lambda: system_utils.execute_system_cmd("volume_up"))
-btn_vup.grid(row=1, column=1, sticky="ew", padx=2, pady=2)
-
-btn_lock = tk.Button(control_grid, text="🔒 Kilitle", bg="#2c121c", fg=RED, font=FONT_SMALL, relief="flat", command=lambda: system_utils.execute_system_cmd("lock"))
-btn_lock.grid(row=2, column=0, sticky="ew", padx=2, pady=2)
-
-btn_sleep = tk.Button(control_grid, text="💤 Uyku", bg="#2c121c", fg=RED, font=FONT_SMALL, relief="flat", command=lambda: system_utils.execute_system_cmd("sleep"))
-btn_sleep.grid(row=2, column=1, sticky="ew", padx=2, pady=2)
-
-control_grid.columnconfigure(0, weight=1)
-control_grid.columnconfigure(1, weight=1)
-
-# Screen and Power controls
-tk.Label(sidebar, text="// EKRAN & GÜÇ", bg=SIDEBAR_BG, fg=DARK_CYAN, font=FONT_SMALL).pack(pady=(10, 2), padx=10, anchor="w")
-
-brightness_frame = tk.Frame(sidebar, bg=SIDEBAR_BG)
-brightness_frame.pack(fill="x", padx=6, pady=2)
-tk.Label(brightness_frame, text="Parlaklık:", bg=SIDEBAR_BG, fg=CYAN, font=FONT_SMALL).pack(side="left")
-
-def change_brightness_slider(val):
-    system_utils.set_brightness(val)
-    
-brightness_slider = tk.Scale(brightness_frame, from_=0, to=100, orient="horizontal", bg=SIDEBAR_BG, fg=CYAN, highlightthickness=0, font=FONT_SMALL, command=change_brightness_slider)
-brightness_slider.set(system_utils.get_brightness())
-brightness_slider.pack(side="right", fill="x", expand=True, padx=(5, 0))
-
-power_frame = tk.Frame(sidebar, bg=SIDEBAR_BG)
-power_frame.pack(fill="x", padx=6, pady=2)
-tk.Label(power_frame, text="Güç:", bg=SIDEBAR_BG, fg=CYAN, font=FONT_SMALL).pack(side="left")
-
-power_plan_var = tk.StringVar(root, value="balanced")
-def change_power_plan(val):
-    system_utils.set_power_plan(val)
-    
-power_plan_menu = tk.OptionMenu(power_frame, power_plan_var, "balanced", "high_performance", "saver", command=change_power_plan)
-power_plan_menu.config(bg=SIDEBAR_BG, fg=CYAN, activebackground=SIDEBAR_BG, activeforeground=CYAN, relief="flat", highlightthickness=0, font=FONT_SMALL)
-power_plan_menu["menu"].config(bg=BG, fg=CYAN, activebackground=SIDEBAR_BG, activeforeground=CYAN, font=FONT_SMALL)
-power_plan_menu.pack(side="right", fill="x", expand=True, padx=(5, 0))
-
-btn_img_analiz = tk.Button(sidebar, text="📷 Görsel Analiz Et", bg="#14223d", fg=CYAN, font=FONT_SMALL, relief="flat", command=show_desktop_image)
-btn_img_analiz.pack(fill="x", padx=6, pady=2)
-
-btn_reminder = tk.Button(sidebar, text="⏰ Zamanlayıcı Kur", bg="#14223d", fg=CYAN, font=FONT_SMALL, relief="flat", command=ask_desktop_reminder)
-btn_reminder.pack(fill="x", padx=6, pady=2)
-
-# Metrics
-metrics_frame = tk.Frame(sidebar, bg=SIDEBAR_BG)
-metrics_frame.pack(side="bottom", fill="x", pady=(5, 5), padx=6)
-
-cpu_lbl = tk.Label(metrics_frame, text="CPU YÜKÜ: --%", bg=SIDEBAR_BG, fg=CYAN, font=FONT_SMALL, anchor="w")
-cpu_lbl.pack(fill="x")
-ram_lbl = tk.Label(metrics_frame, text="RAM KULLAN: --%", bg=SIDEBAR_BG, fg=CYAN, font=FONT_SMALL, anchor="w")
-ram_lbl.pack(fill="x")
-
-def update_desktop_stats():
-    cpu_lbl.config(text=f"CPU YÜKÜ: {system_utils.get_cpu_usage()}%")
-    ram_lbl.config(text=f"RAM KULLAN: {system_utils.get_ram_usage()}%")
-    root.after(3000, update_desktop_stats)
-
-edit_frame = tk.Frame(sidebar, bg=SIDEBAR_BG)
-edit_frame.pack(side="bottom", fill="x", pady=5, padx=6)
-
-add_btn = tk.Button(edit_frame, text="+ Ekle", bg="#112519", fg=GREEN, font=FONT_SMALL, relief="flat", command=show_add)
-add_btn.pack(side="left", fill="x", expand=True, padx=2)
-
-del_btn = tk.Button(edit_frame, text="- Sil", bg="#2c121c", fg=RED, font=FONT_SMALL, relief="flat", command=show_delete)
-del_btn.pack(side="right", fill="x", expand=True, padx=2)
-
-refresh_sidebar()
-update_api_status()
-update_desktop_stats()
-
-# Start the Web HUD server in a daemon thread
-def start_server_in_thread():
-    web_server.start_http_server(
-        run_cmd_cb=lambda cmd: root.after(0, run_cmd, cmd),
-        log_cb=lambda text, tag="": root.after(0, log, text, tag),
-        roles_dict=roles_dict,
-        get_cpu_cb=system_utils.get_cpu_usage,
-        get_ram_cb=system_utils.get_ram_usage,
-        exec_sys_cb=system_utils.execute_system_cmd,
-        update_last_response_cb=update_last_response,
         
-        # Premium features callbacks
-        get_clip_cb=system_utils.get_clipboard_text,
-        set_clip_cb=lambda text: root.after(0, lambda: desktop_set_clipboard(text)),
-        get_bright_cb=system_utils.get_brightness,
-        set_bright_cb=system_utils.set_brightness,
-        set_power_cb=system_utils.set_power_plan,
-        add_rem_cb=add_reminder
+    threading.Thread(target=start_server_in_thread, daemon=True).start()
+    
+    # Start the Telegram Bot in a daemon thread
+    def start_telegram_in_thread():
+        from dotenv import load_dotenv
+        load_dotenv()
+        token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+        allowed_ids = os.getenv("TELEGRAM_ALLOWED_USER_IDS", "")
+        if token and token.strip():
+            telegram_bot.start_telegram_bot(
+                token=token,
+                allowed_ids_str=allowed_ids,
+                log_cb=lambda text, tag="": signals.log_signal.emit(text, tag),
+                run_cmd_cb=lambda cmd: signals.cmd_signal.emit(cmd),
+                roles_dict=roles_dict,
+                role_var=RoleVarWrapper(window.role_combo), # Pass wrapped combo
+                update_last_response_cb=window.update_last_response,
+                add_reminder_cb=add_reminder,
+                set_role_cb=lambda r: signals.role_signal.emit(r)
+            )
+        else:
+            signals.log_signal.emit("[TELEGRAM] Bot aktif değil. .env dosyasında TELEGRAM_BOT_TOKEN tanımlanmalı.", "warn")
+            
+    threading.Thread(target=start_telegram_in_thread, daemon=True).start()
+    
+    # Welcome messages
+    signals.log_signal.emit("    ██╗ █████╗ ██████╗ ██╗   ██╗██╗███████╗", "system")
+    signals.log_signal.emit("    ██║██╔══██╗██╔══██╗██║   ██║██║██╔════╝", "system")
+    signals.log_signal.emit("    ██║███████║██████╔╝██║   ██║██║███████╗", "system")
+    signals.log_signal.emit("██   ██║██╔══██║██╔══██║╚██╗ ██╔╝██║╚════██║", "system")
+    signals.log_signal.emit("╚█████╔╝██║  ██║██║  ██║ ╚████╔╝ ██║███████║", "system")
+    signals.log_signal.emit(" ╚════╝ ╚═╝  ╚═╝╚═╝  ╚═╝  ╚═══╝  ╚═╝╚══════╝", "system")
+    signals.log_signal.emit("", "system")
+    signals.log_signal.emit("[SİSTEM] v0.2 Qt6 başlatılıyor...", "system")
+    signals.log_signal.emit(f"[SİSTEM] {len(cmds)} komut yüklendi.", "system")
+    signals.log_signal.emit("[JARVIS] Hazır. Emredin.", "")
+    
+    # Start Scheduler
+    def notify_telegram_reminder(rem_id, message, t_type):
+        import requests
+        from dotenv import load_dotenv
+        load_dotenv()
+        token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+        allowed_ids_str = os.getenv("TELEGRAM_ALLOWED_USER_IDS", "")
+        if not token or not allowed_ids_str:
+            return
+            
+        inline_keyboard = {
+            "inline_keyboard": [
+                [{"text": "❌ Kapat (Sil)", "callback_data": f"delrem:{rem_id}"}]
+            ]
+        }
+        
+        text_msg = f"🔔 *[HATIRLATICI - {t_type.upper()}]*\n\n{message}"
+        
+        for val in allowed_ids_str.split(","):
+            val = val.strip()
+            if val.isdigit():
+                chat_id = int(val)
+                try:
+                    requests.post(
+                        f"https://api.telegram.org/bot{token}/sendMessage",
+                        json={
+                            "chat_id": chat_id,
+                            "text": text_msg,
+                            "parse_mode": "Markdown",
+                            "reply_markup": inline_keyboard
+                        },
+                        timeout=5
+                    )
+                except Exception:
+                    pass
+
+    import scheduler
+    scheduler.start_scheduler_thread(
+        log_cb=lambda text: signals.log_signal.emit(text, "warn"),
+        notify_gui_cb=lambda rem_id, msg, t_type: signals.reminder_signal.emit(rem_id, msg, t_type),
+        notify_telegram_cb=notify_telegram_reminder
     )
+    
+    sys.exit(app.exec())
 
-threading.Thread(target=start_server_in_thread, daemon=True).start()
-
-log("    ██╗ █████╗ ██████╗ ██╗   ██╗██╗███████╗", "system")
-log("    ██║██╔══██╗██╔══██╗██║   ██║██║██╔════╝", "system")
-log("    ██║███████║██████╔╝██║   ██║██║███████╗", "system")
-log("██   ██║██╔══██║██╔══██║╚██╗ ██╔╝██║╚════██║", "system")
-log("╚█████╔╝██║  ██║██║  ██║ ╚████╔╝ ██║███████║", "system")
-log(" ╚════╝ ╚═╝  ╚═╝╚═╝  ╚═╝  ╚═══╝  ╚═╝╚══════╝", "system")
-log("")
-log("[SİSTEM] v0.1 başlatılıyor...", "system")
-log("[SİSTEM] " + str(len(cmds)) + " komut yüklendi.", "system")
-log("[JARVIS] Hazır. Emredin.", "")
-
-update_clock()
-root.mainloop()
+if __name__ == "__main__":
+    main()

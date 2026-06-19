@@ -1,80 +1,145 @@
-import tkinter as tk
-from tkinter import messagebox, filedialog
-import json
 import os
+import json
 import threading
+from PySide6.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QTextEdit, QPushButton, QListWidget, QCheckBox, QRadioButton,
+    QFileDialog, QButtonGroup, QWidget
+)
+from PySide6.QtCore import Qt
 
+# Style Constants
 CYAN = "#00f3ff"
 DARK_CYAN = "#005f73"
 BG = "#060913"
 SIDEBAR_BG = "#0d111f"
 BORDER_COLOR = "#1a2538"
 GREEN = "#00ff66"
-DARK_GREEN = "#006622"
 RED = "#ff0055"
 AMBER = "#ffaa00"
-FONT = ("Consolas", 11)
-FONT_SMALL = ("Consolas", 9)
 
-def show_roles_dialog(root, roles_dict, refresh_roles_menu_cb, log_cb):
-    dialog = tk.Toplevel(root)
-    dialog.title("Rol Yönetimi")
-    dialog.geometry("500x350")
-    dialog.configure(bg=BG)
-    dialog.resizable(False, False)
-    dialog.transient(root)
-    dialog.grab_set()
+DIALOG_STYLE = f"""
+QDialog {{
+    background-color: {BG};
+    border: 2px solid {CYAN};
+}}
+QWidget {{
+    background-color: {BG};
+    color: #ffffff;
+    font-family: 'Consolas', monospace;
+    font-size: 12px;
+}}
+QLabel {{
+    color: {CYAN};
+    font-weight: bold;
+}}
+QLineEdit, QTextEdit {{
+    background-color: {SIDEBAR_BG};
+    border: 1px solid {BORDER_COLOR};
+    border-radius: 4px;
+    padding: 6px;
+    color: #ffffff;
+}}
+QLineEdit:focus, QTextEdit:focus {{
+    border: 1px solid {CYAN};
+}}
+QListWidget {{
+    background-color: {SIDEBAR_BG};
+    border: 1px solid {BORDER_COLOR};
+    border-radius: 4px;
+    color: #ffffff;
+}}
+QListWidget::item:selected {{
+    background-color: #14223d;
+    color: {CYAN};
+}}
+QPushButton {{
+    background-color: #14223d;
+    border: 1px solid {CYAN};
+    border-radius: 4px;
+    padding: 6px 12px;
+    color: {CYAN};
+    font-weight: bold;
+}}
+QPushButton:hover {{
+    background-color: {CYAN};
+    color: {BG};
+}}
+QPushButton#danger {{
+    background-color: #2c121c;
+    border: 1px solid {RED};
+    color: {RED};
+}}
+QPushButton#danger:hover {{
+    background-color: {RED};
+    color: {BG};
+}}
+QPushButton#success {{
+    background-color: #112519;
+    border: 1px solid {GREEN};
+    color: {GREEN};
+}}
+QPushButton#success:hover {{
+    background-color: {GREEN};
+    color: {BG};
+}}
+QCheckBox, QRadioButton {{
+    color: #ffffff;
+}}
+QCheckBox::indicator, QRadioButton::indicator {{
+    border: 1px solid {BORDER_COLOR};
+    width: 12px;
+    height: 12px;
+    background: {SIDEBAR_BG};
+}}
+QCheckBox::indicator:checked, QRadioButton::indicator:checked {{
+    background: {CYAN};
+    border: 1px solid {CYAN};
+}}
+"""
 
-    # Ortala
-    x = root.winfo_x() + (root.winfo_width() - 500) // 2
-    y = root.winfo_y() + (root.winfo_height() - 350) // 2
-    dialog.geometry(f"+{x}+{y}")
-
-    # Sol tarafta liste, sağ tarafta ekleme formu
-    left_frame = tk.Frame(dialog, bg=BG)
-    left_frame.pack(side="left", fill="both", expand=True, padx=15, pady=15)
-
-    tk.Label(left_frame, text="Mevcut Roller", bg=BG, fg=CYAN, font=FONT_SMALL).pack(anchor="w", pady=(0, 5))
-
-    list_container = tk.Frame(left_frame, bg=BG)
-    list_container.pack(fill="both", expand=True)
-
-    scrollbar = tk.Scrollbar(list_container)
-    scrollbar.pack(side="right", fill="y")
-
-    listbox = tk.Listbox(list_container, bg=SIDEBAR_BG, fg=CYAN, font=FONT_SMALL, relief="flat", yscrollcommand=scrollbar.set, selectbackground="#14223d", selectforeground=CYAN)
-    listbox.pack(side="left", fill="both", expand=True)
-    scrollbar.config(command=listbox.yview)
-
+def show_roles_dialog(parent, roles_dict, refresh_roles_menu_cb, log_cb):
+    dialog = QDialog(parent)
+    dialog.setWindowTitle("Rol Yönetimi")
+    dialog.setStyleSheet(DIALOG_STYLE)
+    dialog.setFixedSize(520, 360)
+    
+    layout = QHBoxLayout(dialog)
+    
+    # Left container (List of roles)
+    left_layout = QVBoxLayout()
+    left_layout.addWidget(QLabel("MEVCUT ROLLER"))
+    
+    listbox = QListWidget()
+    left_layout.addWidget(listbox)
+    
     def populate_listbox():
-        listbox.delete(0, "end")
+        listbox.clear()
         for r_name in roles_dict:
-            listbox.insert("end", r_name)
-
+            listbox.addItem(r_name)
     populate_listbox()
-
-    # Ekleme formu (Sağ taraf)
-    right_frame = tk.Frame(dialog, bg=BG)
-    right_frame.pack(side="right", fill="both", expand=True, padx=15, pady=15)
-
-    tk.Label(right_frame, text="Rol Adı", bg=BG, fg=CYAN, font=FONT_SMALL).pack(anchor="w")
-    name_entry = tk.Entry(right_frame, bg=SIDEBAR_BG, fg=CYAN, font=FONT_SMALL, relief="flat", bd=2)
-    name_entry.pack(fill="x", pady=(0, 10))
-
-    tk.Label(right_frame, text="Sistem Talimatı", bg=BG, fg=CYAN, font=FONT_SMALL).pack(anchor="w")
-    instruction_text = tk.Text(right_frame, bg=SIDEBAR_BG, fg=CYAN, font=FONT_SMALL, relief="flat", bd=2, height=6, wrap="word", insertbackground=CYAN)
-    instruction_text.pack(fill="both", expand=True, pady=(0, 10))
-
+    
+    # Right container (Form)
+    right_layout = QVBoxLayout()
+    right_layout.addWidget(QLabel("YENİ ROL ADI"))
+    name_entry = QLineEdit()
+    right_layout.addWidget(name_entry)
+    
+    right_layout.addWidget(QLabel("SİSTEM TALİMATI"))
+    instruction_text = QTextEdit()
+    right_layout.addWidget(instruction_text)
+    
     def add_new_role():
-        name = name_entry.get().strip()
-        instr = instruction_text.get("1.0", "end").strip()
+        name = name_entry.text().strip()
+        instr = instruction_text.toPlainText().strip()
         if not name or not instr:
-            messagebox.showerror("Hata", "Lütfen rol adı ve talimatı doldurun.", parent=dialog)
             return
             
         try:
-            with open("roles.json", "r", encoding="utf-8") as f:
-                r_dict = json.load(f)
+            r_dict = {}
+            if os.path.exists("roles.json"):
+                with open("roles.json", "r", encoding="utf-8") as f:
+                    r_dict = json.load(f)
             r_dict[name] = instr
             with open("roles.json", "w", encoding="utf-8") as f:
                 json.dump(r_dict, f, indent=2, ensure_ascii=False)
@@ -82,25 +147,25 @@ def show_roles_dialog(root, roles_dict, refresh_roles_menu_cb, log_cb):
             roles_dict[name] = instr
             refresh_roles_menu_cb()
             populate_listbox()
-            name_entry.delete(0, "end")
-            instruction_text.delete("1.0", "end")
+            name_entry.clear()
+            instruction_text.clear()
             log_cb(f"[SİSTEM] Yeni rol eklendi: {name}", "system")
         except Exception as e:
-            messagebox.showerror("Hata", f"Rol kaydedilemedi: {str(e)}", parent=dialog)
-
+            log_cb(f"[HATA] Rol eklenemedi: {str(e)}", "error")
+            
     def delete_selected_role():
-        selection = listbox.curselection()
-        if not selection:
-            messagebox.showerror("Hata", "Lütfen silmek için bir rol seçin.", parent=dialog)
+        current_item = listbox.currentItem()
+        if not current_item:
             return
-        r_name = listbox.get(selection[0])
+        r_name = current_item.text()
         if r_name == "Jarvis":
-            messagebox.showerror("Hata", "Varsayılan Jarvis rolü silinemez.", parent=dialog)
             return
             
         try:
-            with open("roles.json", "r", encoding="utf-8") as f:
-                r_dict = json.load(f)
+            r_dict = {}
+            if os.path.exists("roles.json"):
+                with open("roles.json", "r", encoding="utf-8") as f:
+                    r_dict = json.load(f)
             if r_name in r_dict:
                 del r_dict[r_name]
             with open("roles.json", "w", encoding="utf-8") as f:
@@ -112,54 +177,54 @@ def show_roles_dialog(root, roles_dict, refresh_roles_menu_cb, log_cb):
             populate_listbox()
             log_cb(f"[SİSTEM] Rol silindi: {r_name}", "warn")
         except Exception as e:
-            messagebox.showerror("Hata", f"Rol silinemedi: {str(e)}", parent=dialog)
+            log_cb(f"[HATA] Rol silinemedi: {str(e)}", "error")
 
-    add_btn_action = tk.Button(right_frame, text="Rolü Ekle", bg="#112519", fg=GREEN, font=FONT_SMALL, relief="flat", command=add_new_role)
-    add_btn_action.pack(fill="x", pady=2)
+    btn_add = QPushButton("Rolü Ekle")
+    btn_add.setObjectName("success")
+    btn_add.clicked.connect(add_new_role)
+    right_layout.addWidget(btn_add)
+    
+    btn_del = QPushButton("Seçileni Sil")
+    btn_del.setObjectName("danger")
+    btn_del.clicked.connect(delete_selected_role)
+    left_layout.addWidget(btn_del)
+    
+    layout.addLayout(left_layout)
+    layout.addLayout(right_layout)
+    
+    dialog.exec()
 
-    del_btn_action = tk.Button(left_frame, text="Seçileni Sil", bg="#2c121c", fg=RED, font=FONT_SMALL, relief="flat", command=delete_selected_role)
-    del_btn_action.pack(fill="x", pady=(10, 0))
-
-
-def show_api_settings_dialog(root, update_api_status_cb, log_cb):
-    dialog = tk.Toplevel(root)
-    dialog.title("Gemini API Ayarları")
-    dialog.geometry("400x200")
-    dialog.configure(bg=BG)
-    dialog.resizable(False, False)
-    dialog.transient(root)
-    dialog.grab_set()
-
-    # Ortala
-    x = root.winfo_x() + (root.winfo_width() - 400) // 2
-    y = root.winfo_y() + (root.winfo_height() - 200) // 2
-    dialog.geometry(f"+{x}+{y}")
-
-    tk.Label(dialog, text="Gemini API Anahtarı", bg=BG, fg=CYAN, font=FONT_SMALL).pack(pady=(20, 5), padx=20, anchor="w")
+def show_api_settings_dialog(parent, update_api_status_cb, log_cb):
+    dialog = QDialog(parent)
+    dialog.setWindowTitle("Gemini API Ayarları")
+    dialog.setStyleSheet(DIALOG_STYLE)
+    dialog.setFixedSize(400, 200)
+    
+    layout = QVBoxLayout(dialog)
+    layout.addWidget(QLabel("GEMINI API ANAHTARI"))
     
     from dotenv import load_dotenv
     load_dotenv()
     current_key = os.getenv("GEMINI_API_KEY", "")
     if current_key.startswith("YOUR_GEMINI_API_KEY"):
         current_key = ""
-
-    key_entry = tk.Entry(dialog, bg=SIDEBAR_BG, fg=CYAN, font=FONT, insertbackground=CYAN, relief="flat", bd=2, show="*")
-    key_entry.pack(fill="x", padx=20, pady=(0, 10))
-    key_entry.insert(0, current_key)
-    key_entry.focus_set()
-
-    show_var = tk.BooleanVar(value=False)
-    def toggle_show():
-        if show_var.get():
-            key_entry.config(show="")
+        
+    key_entry = QLineEdit()
+    key_entry.setEchoMode(QLineEdit.Password)
+    key_entry.setText(current_key)
+    layout.addWidget(key_entry)
+    
+    show_cb = QCheckBox("Anahtarı Göster")
+    def toggle_show(state):
+        if state == Qt.Checked.value or state == 2:
+            key_entry.setEchoMode(QLineEdit.Normal)
         else:
-            key_entry.config(show="*")
-            
-    show_cb = tk.Checkbutton(dialog, text="Anahtarı Göster", variable=show_var, bg=BG, fg=DARK_CYAN, activebackground=BG, activeforeground=CYAN, selectcolor=BG, font=FONT_SMALL, command=toggle_show)
-    show_cb.pack(padx=20, anchor="w")
-
+            key_entry.setEchoMode(QLineEdit.Password)
+    show_cb.stateChanged.connect(toggle_show)
+    layout.addWidget(show_cb)
+    
     def save_api_key():
-        new_key = key_entry.get().strip()
+        new_key = key_entry.text().strip()
         try:
             env_lines = []
             if os.path.exists(".env"):
@@ -184,118 +249,94 @@ def show_api_settings_dialog(root, update_api_status_cb, log_cb):
             
             update_api_status_cb()
             log_cb("[SİSTEM] Gemini API anahtarı güncellendi.", "system")
-            dialog.destroy()
+            dialog.accept()
         except Exception as e:
-            messagebox.showerror("Hata", f"API anahtarı kaydedilemedi: {str(e)}", parent=dialog)
+            log_cb(f"[HATA] API anahtarı kaydedilemedi: {str(e)}", "error")
 
-    save_btn = tk.Button(dialog, text="Kaydet", bg="#14223d", fg=CYAN, font=FONT_SMALL, relief="flat", command=save_api_key)
-    save_btn.pack(fill="x", padx=20, pady=15)
+    btn_save = QPushButton("Kaydet")
+    btn_save.clicked.connect(save_api_key)
+    layout.addWidget(btn_save)
+    
+    dialog.exec()
 
-
-def show_add_dialog(root, refresh_sidebar_cb, log_cb):
-    dialog = tk.Toplevel(root)
-    dialog.title("Komut Ekle")
-    dialog.geometry("400x220")
-    dialog.configure(bg=BG)
-    dialog.resizable(False, False)
-    dialog.transient(root)
-    dialog.grab_set()
-
-    # Ortala
-    x = root.winfo_x() + (root.winfo_width() - 400) // 2
-    y = root.winfo_y() + (root.winfo_height() - 220) // 2
-    dialog.geometry(f"+{x}+{y}")
-
-    tk.Label(dialog, text="Kısayol Adı (örn: google)", bg=BG, fg=CYAN, font=FONT_SMALL).pack(pady=(15, 2), padx=20, anchor="w")
-    key_entry = tk.Entry(dialog, bg=SIDEBAR_BG, fg=CYAN, font=FONT, insertbackground=CYAN, relief="flat", bd=2)
-    key_entry.pack(fill="x", padx=20, pady=(0, 10))
-    key_entry.focus_set()
-
-    tk.Label(dialog, text="Komut / URL veya Dosya Yolu", bg=BG, fg=CYAN, font=FONT_SMALL).pack(pady=(5, 2), padx=20, anchor="w")
-    val_frame = tk.Frame(dialog, bg=BG)
-    val_frame.pack(fill="x", padx=20, pady=(0, 15))
-
-    val_entry = tk.Entry(val_frame, bg=SIDEBAR_BG, fg=CYAN, font=FONT, insertbackground=CYAN, relief="flat", bd=2)
-    val_entry.pack(side="left", fill="x", expand=True)
-
+def show_add_dialog(parent, refresh_sidebar_cb, log_cb):
+    dialog = QDialog(parent)
+    dialog.setWindowTitle("Komut Ekle")
+    dialog.setStyleSheet(DIALOG_STYLE)
+    dialog.setFixedSize(400, 220)
+    
+    layout = QVBoxLayout(dialog)
+    layout.addWidget(QLabel("KISAYOL ADI (örn: google)"))
+    key_entry = QLineEdit()
+    layout.addWidget(key_entry)
+    
+    layout.addWidget(QLabel("KOMUT / URL VEYA DOSYA YOLU"))
+    val_layout = QHBoxLayout()
+    val_entry = QLineEdit()
+    val_layout.addWidget(val_entry)
+    
     def select_file():
-        file_path = filedialog.askopenfilename(
-            parent=dialog,
-            title="Dosya veya Uygulama Seç",
-            filetypes=[("Tüm Dosyalar (*.*)", "*.*"), ("Uygulamalar (*.exe)", "*.exe"), ("Kısayollar (*.lnk)", "*.lnk")]
-        )
+        file_path, _ = QFileDialog.getOpenFileName(dialog, "Dosya veya Uygulama Seç", "", "Tüm Dosyalar (*.*);;Uygulamalar (*.exe);;Kısayollar (*.lnk)")
         if file_path:
-            norm_path = os.path.normpath(file_path)
-            val_entry.delete(0, "end")
-            val_entry.insert(0, f'"{norm_path}"')
-
-    select_btn = tk.Button(val_frame, text="Gözat...", bg="#14223d", fg=CYAN, font=FONT_SMALL, relief="flat", activebackground="#1e2d4a", activeforeground=CYAN, command=select_file)
-    select_btn.pack(side="right", padx=(5, 0))
-
+            val_entry.setText(f'"{os.path.normpath(file_path)}"')
+            
+    btn_browse = QPushButton("Gözat...")
+    btn_browse.clicked.connect(select_file)
+    val_layout.addWidget(btn_browse)
+    layout.addLayout(val_layout)
+    
     def save_cmd():
-        k = key_entry.get().strip().lower()
-        v = val_entry.get().strip()
+        k = key_entry.text().strip().lower()
+        v = val_entry.text().strip()
         if not k or not v:
-            messagebox.showerror("Hata", "Lütfen tüm alanları doldurun.", parent=dialog)
             return
-        
+            
         try:
-            with open("command.json", "r", encoding="utf-8") as f:
-                current_cmds = json.load(f)
+            current_cmds = {}
+            if os.path.exists("command.json"):
+                with open("command.json", "r", encoding="utf-8") as f:
+                    current_cmds = json.load(f)
             current_cmds[k] = v
             with open("command.json", "w", encoding="utf-8") as f:
                 json.dump(current_cmds, f, indent=2, ensure_ascii=False)
             
             refresh_sidebar_cb()
             log_cb(f"[SİSTEM] Yeni komut eklendi: {k}", "system")
-            dialog.destroy()
+            dialog.accept()
         except Exception as e:
-            messagebox.showerror("Hata", f"Kaydetme hatası: {str(e)}", parent=dialog)
+            log_cb(f"[HATA] Komut eklenemedi: {str(e)}", "error")
 
-    save_btn = tk.Button(dialog, text="Kaydet", bg="#112519", fg=GREEN, font=FONT_SMALL, relief="flat", command=save_cmd)
-    save_btn.pack(fill="x", padx=20, pady=5)
+    btn_save = QPushButton("Kaydet")
+    btn_save.setObjectName("success")
+    btn_save.clicked.connect(save_cmd)
+    layout.addWidget(btn_save)
+    
+    dialog.exec()
 
-
-def show_delete_dialog(root, cmds, refresh_sidebar_cb, log_cb):
-    dialog = tk.Toplevel(root)
-    dialog.title("Komut Sil")
-    dialog.geometry("300x250")
-    dialog.configure(bg=BG)
-    dialog.resizable(False, False)
-    dialog.transient(root)
-    dialog.grab_set()
-
-    # Ortala
-    x = root.winfo_x() + (root.winfo_width() - 300) // 2
-    y = root.winfo_y() + (root.winfo_height() - 250) // 2
-    dialog.geometry(f"+{x}+{y}")
-
-    tk.Label(dialog, text="Silinecek Komutu Seçin", bg=BG, fg=CYAN, font=FONT_SMALL).pack(pady=(15, 5), padx=20, anchor="w")
-
-    list_frame = tk.Frame(dialog, bg=BG)
-    list_frame.pack(fill="both", expand=True, padx=20, pady=(0, 15))
-
-    scrollbar = tk.Scrollbar(list_frame)
-    scrollbar.pack(side="right", fill="y")
-
-    listbox = tk.Listbox(list_frame, bg=SIDEBAR_BG, fg=CYAN, font=FONT_SMALL, relief="flat", yscrollcommand=scrollbar.set, selectbackground="#14223d", selectforeground=CYAN)
-    listbox.pack(side="left", fill="both", expand=True)
-    scrollbar.config(command=listbox.yview)
-
+def show_delete_dialog(parent, cmds, refresh_sidebar_cb, log_cb):
+    dialog = QDialog(parent)
+    dialog.setWindowTitle("Komut Sil")
+    dialog.setStyleSheet(DIALOG_STYLE)
+    dialog.setFixedSize(300, 250)
+    
+    layout = QVBoxLayout(dialog)
+    layout.addWidget(QLabel("SİLİNECEK KOMUTU SEÇİN"))
+    
+    listbox = QListWidget()
     for k in cmds:
-        listbox.insert("end", k)
-
+        listbox.addItem(k)
+    layout.addWidget(listbox)
+    
     def delete_cmd():
-        selection = listbox.curselection()
-        if not selection:
-            messagebox.showerror("Hata", "Lütfen silinecek bir komut seçin.", parent=dialog)
+        current_item = listbox.currentItem()
+        if not current_item:
             return
-        
-        k = listbox.get(selection[0])
-        
+        k = current_item.text()
         try:
-            with open("command.json", "r", encoding="utf-8") as f:
-                current_cmds = json.load(f)
+            current_cmds = {}
+            if os.path.exists("command.json"):
+                with open("command.json", "r", encoding="utf-8") as f:
+                    current_cmds = json.load(f)
             if k in current_cmds:
                 del current_cmds[k]
             with open("command.json", "w", encoding="utf-8") as f:
@@ -303,45 +344,38 @@ def show_delete_dialog(root, cmds, refresh_sidebar_cb, log_cb):
             
             refresh_sidebar_cb()
             log_cb(f"[SİSTEM] Komut silindi: {k}", "warn")
-            dialog.destroy()
+            dialog.accept()
         except Exception as e:
-            messagebox.showerror("Hata", f"Silme hatası: {str(e)}", parent=dialog)
+            log_cb(f"[HATA] Komut silinemedi: {str(e)}", "error")
 
-    del_btn = tk.Button(dialog, text="Seçileni Sil", bg="#2c121c", fg=RED, font=FONT_SMALL, relief="flat", command=delete_cmd)
-    del_btn.pack(fill="x", padx=20, pady=10)
+    btn_del = QPushButton("Seçileni Sil")
+    btn_del.setObjectName("danger")
+    btn_del.clicked.connect(delete_cmd)
+    layout.addWidget(btn_del)
+    
+    dialog.exec()
 
-
-def show_desktop_image_analysis(root, role_var, roles_dict, log_cb, update_last_response_cb):
-    file_path = filedialog.askopenfilename(
-        title="Analiz Edilecek Görseli Seçin",
-        filetypes=[("Görseller", "*.png *.jpg *.jpeg *.webp *.gif")]
-    )
+def show_desktop_image_analysis(parent, active_role_name, roles_dict, log_cb, update_last_response_cb):
+    file_path, _ = QFileDialog.getOpenFileName(parent, "Analiz Edilecek Görseli Seçin", "", "Görseller (*.png *.jpg *.jpeg *.webp *.gif)")
     if not file_path:
         return
         
-    prompt_dialog = tk.Toplevel(root)
-    prompt_dialog.title("Görsel Analiz Sorusu")
-    prompt_dialog.geometry("400x180")
-    prompt_dialog.configure(bg=BG)
-    prompt_dialog.resizable(False, False)
-    prompt_dialog.transient(root)
-    prompt_dialog.grab_set()
+    dialog = QDialog(parent)
+    dialog.setWindowTitle("Görsel Analiz Sorusu")
+    dialog.setStyleSheet(DIALOG_STYLE)
+    dialog.setFixedSize(400, 180)
     
-    x = root.winfo_x() + (root.winfo_width() - 400) // 2
-    y = root.winfo_y() + (root.winfo_height() - 180) // 2
-    prompt_dialog.geometry(f"+{x}+{y}")
-    
-    tk.Label(prompt_dialog, text="Görsel hakkında ne sormak istersiniz?", bg=BG, fg=CYAN, font=FONT_SMALL).pack(pady=(15, 5), padx=20, anchor="w")
-    prompt_entry = tk.Entry(prompt_dialog, bg=SIDEBAR_BG, fg=CYAN, font=FONT, insertbackground=CYAN, relief="flat", bd=2)
-    prompt_entry.pack(fill="x", padx=20, pady=(0, 15))
-    prompt_entry.insert(0, "Bu fotoğrafta ne görüyorsun?")
-    prompt_entry.focus_set()
+    layout = QVBoxLayout(dialog)
+    layout.addWidget(QLabel("Görsel hakkında ne sormak istersiniz?"))
+    prompt_entry = QLineEdit()
+    prompt_entry.setText("Bu fotoğrafta ne görüyorsun?")
+    layout.addWidget(prompt_entry)
     
     def analyze():
-        prompt = prompt_entry.get().strip()
+        prompt = prompt_entry.text().strip()
         if not prompt:
             return
-        prompt_dialog.destroy()
+        dialog.accept()
         
         log_cb(f"[SİSTEM] Görsel analiz ediliyor ({os.path.basename(file_path)})...", "system")
         
@@ -351,117 +385,362 @@ def show_desktop_image_analysis(root, role_var, roles_dict, log_cb, update_last_
                     img_bytes = img_f.read()
                 
                 ext = os.path.splitext(file_path)[1].lower()
-                if ext in (".png", ".webp", ".gif"):
-                    mime = f"image/{ext[1:]}"
-                else:
-                    mime = "image/jpeg"
-                    
+                mime = f"image/{ext[1:]}" if ext in (".png", ".webp", ".gif") else "image/jpeg"
+                
                 from search_bot import ask_gemini
-                active_role = role_var.get()
-                system_instruction = roles_dict.get(active_role, None)
+                system_instruction = roles_dict.get(active_role_name, None)
                 ans = ask_gemini(prompt, system_instruction=system_instruction, image_data={"mime_type": mime, "data": img_bytes})
                 
-                def update_ui():
-                    update_last_response_cb(ans)
-                    log_cb("\n[JARVIS - GÖRSEL ANALİZ]", "system")
-                    log_cb(ans)
-                    log_cb("")
-                root.after(0, update_ui)
+                update_last_response_cb(ans)
+                log_cb("\n[JARVIS - GÖRSEL ANALİZ]", "system")
+                log_cb(ans)
+                log_cb("")
             except Exception as e:
-                root.after(0, lambda: log_cb(f"[HATA] Görsel analiz edilemedi: {str(e)}", "error"))
+                log_cb(f"[HATA] Görsel analiz edilemedi: {str(e)}", "error")
                 
         threading.Thread(target=do_analysis, daemon=True).start()
-        
-    btn_analiz = tk.Button(prompt_dialog, text="Analiz Et", bg="#112519", fg=GREEN, font=FONT_SMALL, relief="flat", command=analyze)
-    btn_analiz.pack(fill="x", padx=20, pady=5)
 
-def show_reminder_popup(root, message):
-    popup = tk.Toplevel(root)
-    popup.title("HATIRLATICI BİLDİRİMİ")
-    popup.geometry("380x200")
-    popup.configure(bg=BG, highlightbackground=RED, highlightthickness=2)
-    popup.resizable(False, False)
-    popup.attributes("-topmost", True)
+    btn_analiz = QPushButton("Analiz Et")
+    btn_analiz.setObjectName("success")
+    btn_analiz.clicked.connect(analyze)
+    layout.addWidget(btn_analiz)
+    
+    dialog.exec()
 
-    # Ortala
-    x = root.winfo_x() + (root.winfo_width() - 380) // 2
-    y = root.winfo_y() + (root.winfo_height() - 200) // 2
-    popup.geometry(f"+{x}+{y}")
+def show_scheduled_reminder_popup(parent, rem_id, message, t_type, delete_cb):
+    popup = QDialog(parent)
+    popup.setWindowTitle("HATIRLATICI BİLDİRİMİ")
+    popup.setStyleSheet(DIALOG_STYLE.replace(CYAN, AMBER))
+    popup.setFixedSize(380, 200)
+    popup.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.Dialog)
+    
+    layout = QVBoxLayout(popup)
+    
+    title_lbl = QLabel(f"// {t_type.upper()} HATIRLATMA")
+    title_lbl.setStyleSheet(f"color: {AMBER}; font-size: 14px;")
+    title_lbl.setAlignment(Qt.AlignCenter)
+    layout.addWidget(title_lbl)
+    
+    msg_lbl = QLabel(message)
+    msg_lbl.setWordWrap(True)
+    msg_lbl.setStyleSheet("color: #ffffff; font-size: 13px;")
+    msg_lbl.setAlignment(Qt.AlignCenter)
+    layout.addWidget(msg_lbl)
+    
+    # Sound effect
+    import winsound
+    def play_sound():
+        for _ in range(3):
+            if not popup.isVisible():
+                break
+            winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
+            import time
+            time.sleep(0.5)
+    threading.Thread(target=play_sound, daemon=True).start()
+    
+    btn_layout = QHBoxLayout()
+    btn_ok = QPushButton("TAMAM (KAPAT)")
+    btn_ok.clicked.connect(popup.accept)
+    btn_layout.addWidget(btn_ok)
+    
+    btn_del = QPushButton("HATIRLATICIYI SİL")
+    btn_del.setObjectName("danger")
+    def on_delete():
+        delete_cb(rem_id)
+        popup.accept()
+    btn_del.clicked.connect(on_delete)
+    btn_layout.addWidget(btn_del)
+    
+    layout.addLayout(btn_layout)
+    popup.exec()
 
-    color_state = [True]
-
-    title_label = tk.Label(popup, text="// UYARI: ZAMANLAYICI UYARISI", bg=BG, fg=RED, font=("Consolas", 11, "bold"))
-    title_label.pack(pady=(20, 10))
-
-    msg_label = tk.Label(popup, text=message, bg=BG, fg="#ffffff", font=("Consolas", 12), wrap=340)
-    msg_label.pack(pady=10, padx=20, fill="both", expand=True)
-
-    btn_ok = tk.Button(popup, text="TAMAM", bg="#2c121c", fg=RED, font=FONT_SMALL, relief="flat", activebackground=RED, activeforeground="#ffffff", command=popup.destroy)
-    btn_ok.pack(pady=(10, 20), padx=50, fill="x")
-
-    def blink():
-        if not popup.winfo_exists():
+def show_reminder_manager_dialog(parent, log_cb):
+    import scheduler
+    dialog = QDialog(parent)
+    dialog.setWindowTitle("Hatırlatıcı Yönetimi")
+    dialog.setStyleSheet(DIALOG_STYLE)
+    dialog.setFixedSize(600, 480)
+    
+    layout = QHBoxLayout(dialog)
+    
+    # Left container
+    left_layout = QVBoxLayout()
+    left_layout.addWidget(QLabel("// AKTİF HATIRLATICILAR"))
+    
+    listbox = QListWidget()
+    left_layout.addWidget(listbox)
+    
+    rem_ids_in_list = []
+    
+    def populate_listbox():
+        listbox.clear()
+        rem_ids_in_list.clear()
+        reminders = scheduler.load_reminders()
+        for rem_id, rem in reminders.items():
+            rem_ids_in_list.append(rem_id)
+            if rem["type"] == "recurrent":
+                info = f"[Tekrarlı] {rem['message']} (Her {rem['interval_minutes']} dk)"
+            else:
+                freq_info = f" (Sıklık: {rem['frequency_minutes']} dk)" if rem.get('frequency_minutes', 0) > 0 else ""
+                info = f"[Zamanlı] {rem['message']} ({rem['target_time']}{freq_info})"
+            listbox.addItem(info)
+            
+    populate_listbox()
+    
+    def delete_selected():
+        row = listbox.currentRow()
+        if row < 0:
             return
-        if color_state[0]:
-            popup.configure(highlightbackground=AMBER)
-            title_label.config(fg=AMBER)
-            btn_ok.config(fg=AMBER, bg="#332200")
+        rem_id = rem_ids_in_list[row]
+        if scheduler.delete_reminder(rem_id):
+            log_cb(f"[SİSTEM] Hatırlatıcı silindi (ID: {rem_id})", "system")
+            populate_listbox()
+            
+    btn_del = QPushButton("SEÇİLENİ SİL")
+    btn_del.setObjectName("danger")
+    btn_del.clicked.connect(delete_selected)
+    left_layout.addWidget(btn_del)
+    
+    # Right container
+    right_layout = QVBoxLayout()
+    right_layout.addWidget(QLabel("// YENİ HATIRLATICI"))
+    
+    type_group = QButtonGroup(dialog)
+    btn_rec = QRadioButton("Tekrarlı")
+    btn_once = QRadioButton("Zamanlanmış")
+    btn_rec.setChecked(True)
+    type_group.addButton(btn_rec)
+    type_group.addButton(btn_once)
+    
+    radio_layout = QHBoxLayout()
+    radio_layout.addWidget(btn_rec)
+    radio_layout.addWidget(btn_once)
+    right_layout.addLayout(radio_layout)
+    
+    inputs_container = QVBoxLayout()
+    right_layout.addLayout(inputs_container)
+    
+    inputs_widgets = []
+    
+    def draw_inputs():
+        for w in inputs_widgets:
+            inputs_container.removeWidget(w)
+            w.deleteLater()
+        inputs_widgets.clear()
+        
+        lbl_msg = QLabel("Hatırlatma Mesajı")
+        msg_entry = QLineEdit()
+        inputs_container.addWidget(lbl_msg)
+        inputs_container.addWidget(msg_entry)
+        inputs_widgets.extend([lbl_msg, msg_entry])
+        
+        if btn_rec.isChecked():
+            lbl_val = QLabel("Tekrarlama Aralığı (Dakika)")
+            val_entry = QLineEdit()
+            val_entry.setText("30")
+            inputs_container.addWidget(lbl_val)
+            inputs_container.addWidget(val_entry)
+            inputs_widgets.extend([lbl_val, val_entry])
+            
+            def add_rec():
+                msg = msg_entry.text().strip()
+                val = val_entry.text().strip()
+                if not msg or not val:
+                    return
+                try:
+                    mins = float(val)
+                except ValueError:
+                    return
+                scheduler.add_recurrent_reminder(msg, mins)
+                log_cb(f"[SİSTEM] Yeni tekrarlı hatırlatıcı kuruldu (Her {mins} dk): '{msg}'", "system")
+                populate_listbox()
+                msg_entry.clear()
+                
+            btn_add = QPushButton("EKLE (TEKRARLI)")
+            btn_add.setObjectName("success")
+            btn_add.clicked.connect(add_rec)
+            inputs_container.addWidget(btn_add)
+            inputs_widgets.append(btn_add)
+            
         else:
-            popup.configure(highlightbackground=RED)
-            title_label.config(fg=RED)
-            btn_ok.config(fg=RED, bg="#2c121c")
-        color_state[0] = not color_state[0]
-        popup.after(500, blink)
+            lbl_time = QLabel("Tarih & Saat (Örn: 22.06.2026 14:00)")
+            time_entry = QLineEdit()
+            from datetime import datetime, timedelta
+            suggested = (datetime.now() + timedelta(minutes=30)).strftime("%d.%m.%Y %H:%M")
+            time_entry.setText(suggested)
+            inputs_container.addWidget(lbl_time)
+            inputs_container.addWidget(time_entry)
+            inputs_widgets.extend([lbl_time, time_entry])
+            
+            lbl_freq = QLabel("Bildirim Sıklığı (Dakika, 0 = Tek Sefer)")
+            freq_entry = QLineEdit()
+            freq_entry.setText("15")
+            inputs_container.addWidget(lbl_freq)
+            inputs_container.addWidget(freq_entry)
+            inputs_widgets.extend([lbl_freq, freq_entry])
+            
+            def add_once():
+                msg = msg_entry.text().strip()
+                t_str = time_entry.text().strip()
+                freq = freq_entry.text().strip()
+                if not msg or not t_str:
+                    return
+                try:
+                    f_val = float(freq) if freq else 0.0
+                except ValueError:
+                    return
+                try:
+                    scheduler.add_once_reminder(msg, t_str, f_val)
+                    log_cb(f"[SİSTEM] Yeni zamanlanmış hatırlatıcı kuruldu ({t_str}): '{msg}'", "system")
+                    populate_listbox()
+                    msg_entry.clear()
+                except Exception as e:
+                    log_cb(f"[HATA] Hatırlatıcı kurulamadı: {str(e)}", "error")
+                    
+            btn_add = QPushButton("EKLE (ZAMANLI)")
+            btn_add.setObjectName("success")
+            btn_add.clicked.connect(add_once)
+            inputs_container.addWidget(btn_add)
+            inputs_widgets.append(btn_add)
+            
+    btn_rec.toggled.connect(draw_inputs)
+    draw_inputs()
+    
+    layout.addLayout(left_layout)
+    layout.addLayout(right_layout)
+    
+    dialog.exec()
 
-    blink()
-
-def show_create_reminder_dialog(root, add_reminder_cb):
-    dialog = tk.Toplevel(root)
-    dialog.title("Zamanlayıcı Bildirimi")
-    dialog.geometry("380x250")
-    dialog.configure(bg=BG, highlightbackground=CYAN, highlightthickness=2)
-    dialog.resizable(False, False)
-    dialog.transient(root)
-    dialog.grab_set()
-
-    # Ortala
-    x = root.winfo_x() + (root.winfo_width() - 380) // 2
-    y = root.winfo_y() + (root.winfo_height() - 250) // 2
-    dialog.geometry(f"+{x}+{y}")
-
-    tk.Label(dialog, text="// YENİ ZAMANLAYICI BİLDİRİMİ", bg=BG, fg=CYAN, font=("Consolas", 11, "bold")).pack(pady=(15, 10))
-
-    tk.Label(dialog, text="Kaç dakika sonra?", bg=BG, fg=DARK_CYAN, font=FONT_SMALL).pack(anchor="w", padx=30)
-    min_entry = tk.Entry(dialog, bg=SIDEBAR_BG, fg="#ffffff", font=FONT, insertbackground=CYAN, relief="flat", bd=2)
-    min_entry.pack(fill="x", padx=30, pady=(0, 10))
-    min_entry.insert(0, "5")
-    min_entry.focus_set()
-
-    tk.Label(dialog, text="Bildirim mesajı?", bg=BG, fg=DARK_CYAN, font=FONT_SMALL).pack(anchor="w", padx=30)
-    msg_entry = tk.Entry(dialog, bg=SIDEBAR_BG, fg="#ffffff", font=FONT, insertbackground=CYAN, relief="flat", bd=2)
-    msg_entry.pack(fill="x", padx=30, pady=(0, 15))
-    msg_entry.insert(0, "Zaman doldu!")
-
+def show_telegram_settings_dialog(parent, log_cb):
+    dialog = QDialog(parent)
+    dialog.setWindowTitle("Telegram Bot Ayarları")
+    dialog.setStyleSheet(DIALOG_STYLE)
+    dialog.setFixedSize(420, 340)
+    
+    layout = QVBoxLayout(dialog)
+    layout.addWidget(QLabel("// TELEGRAM BOT AYARLARI"))
+    
+    from dotenv import load_dotenv
+    load_dotenv()
+    token_val = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    allowed_val = os.getenv("TELEGRAM_ALLOWED_USER_IDS", "")
+    pin_val = os.getenv("TELEGRAM_AUTH_PIN", "123456")
+    
+    layout.addWidget(QLabel("Telegram Bot Token"))
+    token_entry = QLineEdit()
+    token_entry.setText(token_val)
+    layout.addWidget(token_entry)
+    
+    layout.addWidget(QLabel("İzinli Kullanıcı ID'leri (virgülle ayırın)"))
+    allowed_entry = QLineEdit()
+    allowed_entry.setText(allowed_val)
+    layout.addWidget(allowed_entry)
+    
+    layout.addWidget(QLabel("Giriş / Yetkilendirme Şifresi (PIN)"))
+    pin_entry = QLineEdit()
+    pin_entry.setText(pin_val)
+    layout.addWidget(pin_entry)
+    
     def on_save():
-        minutes = min_entry.get().strip()
-        message = msg_entry.get().strip()
-        if not minutes or not message:
-            messagebox.showerror("Hata", "Lütfen tüm alanları doldurun.", parent=dialog)
-            return
-        try:
-            float(minutes)
-        except ValueError:
-            messagebox.showerror("Hata", "Lütfen geçerli bir dakika girin.", parent=dialog)
-            return
+        new_token = token_entry.text().strip()
+        new_allowed = allowed_entry.text().strip()
+        new_pin = pin_entry.text().strip()
         
-        add_reminder_cb(minutes, message)
-        dialog.destroy()
+        if not new_pin:
+            return
+            
+        try:
+            env_lines = []
+            if os.path.exists(".env"):
+                with open(".env", "r", encoding="utf-8") as f:
+                    env_lines = f.readlines()
+                    
+            def set_env_var(key, val):
+                found = False
+                for idx, line in enumerate(env_lines):
+                    if line.strip().startswith(f"{key}="):
+                        env_lines[idx] = f"{key}={val}\n"
+                        found = True
+                        break
+                if not found:
+                    env_lines.append(f"{key}={val}\n")
+                    
+            set_env_var("TELEGRAM_BOT_TOKEN", new_token)
+            set_env_var("TELEGRAM_ALLOWED_USER_IDS", new_allowed)
+            set_env_var("TELEGRAM_AUTH_PIN", new_pin)
+            
+            with open(".env", "w", encoding="utf-8") as f:
+                f.writelines(env_lines)
+                
+            log_cb("[TELEGRAM] Ayarlar güncellendi. Şifre ve İzinli ID'ler anında güncellendi (Token değişikliği için uygulamayı yeniden başlatın).", "system")
+            dialog.accept()
+        except Exception as e:
+            log_cb(f"[HATA] Ayarlar kaydedilemedi: {str(e)}", "error")
 
-    btn_frame = tk.Frame(dialog, bg=BG)
-    btn_frame.pack(fill="x", padx=30, pady=5)
+    btn_save = QPushButton("KAYDET")
+    btn_save.setObjectName("success")
+    btn_save.clicked.connect(on_save)
+    layout.addWidget(btn_save)
+    
+    dialog.exec()
 
-    btn_cancel = tk.Button(btn_frame, text="İPTAL", bg="#2c121c", fg=RED, font=FONT_SMALL, relief="flat", command=dialog.destroy)
-    btn_cancel.pack(side="left", fill="x", expand=True, padx=(0, 5))
+def show_welcome_guide(parent):
+    import webbrowser
+    dialog = QDialog(parent)
+    dialog.setWindowTitle("NexusHUD Kurulum ve Kullanım Kılavuzu")
+    dialog.setStyleSheet(DIALOG_STYLE)
+    dialog.setFixedSize(580, 500)
+    
+    layout = QVBoxLayout(dialog)
+    
+    lbl_title = QLabel("// NEXUSHUD HOŞ GELDİNİZ")
+    lbl_title.setStyleSheet(f"color: {CYAN}; font-size: 16px; font-weight: bold;")
+    lbl_title.setAlignment(Qt.AlignCenter)
+    layout.addWidget(lbl_title)
+    
+    guide_text = (
+        "NexusHUD'ı kullanmaya başlamak için gerekli API anahtarlarını tanımlamanız gerekmektedir.\n\n"
+        "1️⃣ **Google Gemini API Anahtarı:**\n"
+        "• Yapay zeka ile sohbet ve görsel analiz özellikleri için gereklidir.\n"
+        "• Google AI Studio adresine gidip ücretsiz anahtar oluşturabilirsiniz.\n\n"
+        "2️⃣ **Telegram Bot Token:**\n"
+        "• Bilgisayarınızı uzaktan kontrol etmek ve bildirim almak için gereklidir.\n"
+        "• Telegram'da BotFather'a gidip '/newbot' komutu ile bot oluşturabilirsiniz."
+    )
+    
+    lbl_desc = QLabel(guide_text)
+    lbl_desc.setWordWrap(True)
+    lbl_desc.setStyleSheet("color: #ffffff; font-size: 12px; line-height: 18px;")
+    layout.addWidget(lbl_desc)
+    
+    # Buttons for links
+    btn_layout = QHBoxLayout()
+    
+    btn_gemini_link = QPushButton("🔑 Gemini API Anahtarı Al")
+    btn_gemini_link.clicked.connect(lambda: webbrowser.open("https://aistudio.google.com/"))
+    btn_layout.addWidget(btn_gemini_link)
+    
+    btn_tg_link = QPushButton("🤖 Telegram BotFather Git")
+    btn_tg_link.clicked.connect(lambda: webbrowser.open("https://t.me/BotFather"))
+    btn_layout.addWidget(btn_tg_link)
+    
+    layout.addLayout(btn_layout)
+    
+    lbl_pin_info = QLabel(
+        "3️⃣ **Başlatma ve Kimlik Doğrulama:**\n"
+        "• Anahtarlarınızı kaydettikten sonra botu çalıştırın.\n"
+        "• Telegram üzerinden botunuza ilk mesajı gönderdiğinizde bot kilitli olacaktır.\n"
+        "• Arayüzde veya '.env' dosyasında yazan **Giriş Şifresini (PIN)** bota göndererek kendinizi yetkilendirin.\n"
+        "• Varsayılan şifre: **123456**"
+    )
+    lbl_pin_info.setWordWrap(True)
+    lbl_pin_info.setStyleSheet(f"color: {AMBER}; font-size: 12px;")
+    layout.addWidget(lbl_pin_info)
+    
+    btn_close = QPushButton("KURULUMA BAŞLA")
+    btn_close.setObjectName("success")
+    btn_close.clicked.connect(dialog.accept)
+    layout.addWidget(btn_close)
+    
+    dialog.exec()
 
-    btn_save = tk.Button(btn_frame, text="KUR", bg="#112519", fg=GREEN, font=FONT_SMALL, relief="flat", command=on_save)
-    btn_save.pack(side="right", fill="x", expand=True, padx=(5, 0))
